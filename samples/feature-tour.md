@@ -8,7 +8,7 @@ MDUI renders Markdown in the terminal with a small, predictable feature set.
 | --- | --- | --- |
 | `mdui README.md` | Render one file directly | Ready |
 | `mdui` | Open the Markdown finder | Ready |
-| `/` | Focus filter input in finder mode | Planned |
+| `/` | Filter files or search the open document | Ready |
 
 ## Lists
 
