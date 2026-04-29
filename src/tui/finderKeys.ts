@@ -34,7 +34,10 @@ export type FinderKeyDecision =
   | { readonly kind: "openLink" }
   | { readonly kind: "startDocumentSearch" }
   | { readonly kind: "updateDocumentSearch"; readonly query: string }
+  | { readonly kind: "confirmDocumentSearch" }
   | { readonly kind: "clearDocumentSearch" }
+  | { readonly kind: "nextSearchMatch" }
+  | { readonly kind: "previousSearchMatch" }
   | { readonly kind: "moveCursorLeft" }
   | { readonly kind: "moveCursorRight" }
   | { readonly kind: "moveCursorUp" }
@@ -48,6 +51,10 @@ export type FinderKeyDecision =
   | { readonly kind: "scrollPageUp" }
   | { readonly kind: "scrollToTop" }
   | { readonly kind: "scrollToBottom" }
+  | { readonly kind: "jumpToLine"; readonly line: number }
+  | { readonly kind: "toggleToc" }
+  | { readonly kind: "navigateBack" }
+  | { readonly kind: "navigateForward" }
   | { readonly kind: "startFilter" }
   | { readonly kind: "updateFilter"; readonly query: string }
   | { readonly kind: "clearFilter" }
@@ -93,6 +100,9 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
       if (key.name === "backspace" || key.name === "delete") {
         return { kind: "updateDocumentSearch", query: state.query.slice(0, -1) };
       }
+      if (key.name === "enter" || key.name === "return") {
+        return { kind: "confirmDocumentSearch" };
+      }
       if (key.name.length === 1 && !key.ctrl && !key.meta) {
         return { kind: "updateDocumentSearch", query: `${state.query}${key.sequence ?? key.name}` };
       }
@@ -116,6 +126,12 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
     if (sidebarVisible) {
       return { kind: "passThrough" };
     }
+    if (key.name === "n" && !key.ctrl && !key.meta) {
+      return { kind: "nextSearchMatch" };
+    }
+    if ((key.name === "p" && !key.ctrl && !key.meta) || isPlainCharacter(key, "N")) {
+      return { kind: "previousSearchMatch" };
+    }
     if (isCountDigit(key, countPrefix)) {
       return { kind: "accumulateCount", digit: key.name };
     }
@@ -124,6 +140,15 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
     }
     if ((key.name === "o" || key.name === "enter") && !key.ctrl && !key.meta) {
       return { kind: "openLink" };
+    }
+    if (key.name === "o" && key.ctrl && !key.meta) {
+      return { kind: "navigateBack" };
+    }
+    if (key.name === "i" && key.ctrl && !key.meta) {
+      return { kind: "navigateForward" };
+    }
+    if (key.name === "t" && !key.ctrl && !key.meta) {
+      return { kind: "toggleToc" };
     }
     if (key.name === "y" && !key.ctrl && !key.meta && vimMode !== "normal") {
       return { kind: "yankAndExitVisual" };
@@ -162,6 +187,9 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
       return goPrefixActive ? { kind: "scrollToTop" } : { kind: "startGoPrefix" };
     }
     if (isPlainCharacter(key, "G")) {
+      if (countPrefix.length > 0) {
+        return { kind: "jumpToLine", line: Number.parseInt(countPrefix, 10) };
+      }
       return { kind: "scrollToBottom" };
     }
   }
