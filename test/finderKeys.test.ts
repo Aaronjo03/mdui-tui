@@ -103,6 +103,22 @@ describe("finder key decisions", () => {
     expect(decideFinderKey(state, key("G"))).toEqual({ kind: "scrollToBottom" });
   });
 
+  it("supports count-prefixed G line jumps", () => {
+    const state = { routeType: "document" as const, filterActive: false, query: "", sidebarVisible: false, vimMode: "normal" as const, countPrefix: "42" };
+
+    expect(decideFinderKey(state, key("G"))).toEqual({ kind: "jumpToLine", line: 42 });
+  });
+
+  it("supports search repeat, ToC, and internal link history keys", () => {
+    const state = { routeType: "document" as const, filterActive: false, query: "", sidebarVisible: false, vimMode: "normal" as const };
+
+    expect(decideFinderKey(state, key("n"))).toEqual({ kind: "nextSearchMatch" });
+    expect(decideFinderKey(state, key("N"))).toEqual({ kind: "previousSearchMatch" });
+    expect(decideFinderKey(state, key("t"))).toEqual({ kind: "toggleToc" });
+    expect(decideFinderKey(state, { name: "o", ctrl: true, meta: false })).toEqual({ kind: "navigateBack" });
+    expect(decideFinderKey(state, { name: "i", ctrl: true, meta: false })).toEqual({ kind: "navigateForward" });
+  });
+
   it("supports read-only character cursor movement", () => {
     const state = { routeType: "document" as const, filterActive: false, query: "", sidebarVisible: false, vimMode: "normal" as const };
 
@@ -141,6 +157,19 @@ describe("finder key decisions", () => {
     expect(decideFinderKey(state, key("b"))).toEqual({ kind: "updateDocumentSearch", query: "tab" });
     expect(decideFinderKey(state, key("backspace"))).toEqual({ kind: "updateDocumentSearch", query: "t" });
     expect(decideFinderKey(state, key("escape"))).toEqual({ kind: "clearDocumentSearch" });
+  });
+
+  it("confirms document search on Enter", () => {
+    const state = { routeType: "document" as const, filterActive: false, query: "test", sidebarVisible: false, vimMode: "normal" as const, documentSearchActive: true };
+
+    expect(decideFinderKey(state, key("enter"))).toEqual({ kind: "confirmDocumentSearch" });
+  });
+
+  it("navigates search matches with n and p", () => {
+    const state = { routeType: "document" as const, filterActive: false, query: "", sidebarVisible: false, vimMode: "normal" as const };
+
+    expect(decideFinderKey(state, key("n"))).toEqual({ kind: "nextSearchMatch" });
+    expect(decideFinderKey(state, key("p"))).toEqual({ kind: "previousSearchMatch" });
   });
 
   it("does not steal c from finder filtering", () => {

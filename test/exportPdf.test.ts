@@ -57,6 +57,47 @@ describe("PDF export", () => {
       await rm(tempDirectory, { recursive: true, force: true });
     }
   });
+
+  it("escapes raw HTML without pre-escaping fenced code markdown", async () => {
+    const tempDirectory = await mkdtemp(join(tmpdir(), "mdui-export-test-"));
+    const chromeStubPath = await createChromeStub(tempDirectory);
+
+    try {
+      const outputPath = await exportMarkdownToPdf(["<script>alert(1)</script>", "", "```html", "<div>code</div>", "```"].join("\n"), "html.md", {
+        outputDirectory: tempDirectory,
+        chromeExecutable: chromeStubPath,
+      });
+      const documentUrl = await Bun.file(`${outputPath}.url`).text();
+      const html = decodeDataUrlHtml(documentUrl);
+
+      expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+      expect(html).toContain("&lt;div&gt;code&lt;/div&gt;");
+      expect(html).not.toContain("&amp;lt;div&amp;gt;code&amp;lt;/div&amp;gt;");
+    } finally {
+      await rm(tempDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("allows safe structural raw HTML tags while escaping scripts", async () => {
+    const tempDirectory = await mkdtemp(join(tmpdir(), "mdui-export-test-"));
+    const chromeStubPath = await createChromeStub(tempDirectory);
+
+    try {
+      const outputPath = await exportMarkdownToPdf(["<details>", "<summary>", "More", "</summary>", "<script>alert(1)</script>", "</details>", "Line<br>break"].join("\n"), "html.md", {
+        outputDirectory: tempDirectory,
+        chromeExecutable: chromeStubPath,
+      });
+      const documentUrl = await Bun.file(`${outputPath}.url`).text();
+      const html = decodeDataUrlHtml(documentUrl);
+
+      expect(html).toContain("<details>");
+      expect(html).toContain("<summary>");
+      expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+      expect(html).not.toContain("<script>");
+    } finally {
+      await rm(tempDirectory, { recursive: true, force: true });
+    }
+  });
 });
 
 async function createChromeStub(tempDirectory: string): Promise<string> {

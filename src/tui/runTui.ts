@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { watch, type FSWatcher } from "node:fs";
 import { basename } from "node:path";
 import { spawn } from "node:child_process";
+import type { MduiConfig } from "../config/config.js";
 import {
   BoxRenderable,
   createCliRenderer,
@@ -11,18 +13,24 @@ import {
   SyntaxStyle,
   TextRenderable,
   type KeyEvent,
+  MouseButton,
+  type MouseEvent,
   type SelectOption,
 } from "@opentui/core";
 import { exportMarkdownToPdf } from "../export/pdf.js";
 import { markdownToSlackMrkdwn } from "../export/slack.js";
 import { discoverMarkdownFiles, type MarkdownFile } from "../fs/markdownFiles.js";
 import { filterFiles, type RankedFile } from "../finder/filterFiles.js";
+import { firstDocumentLink, resolveInternalMarkdownFile } from "../markdown/links.js";
 import { renderMarkdownToAnsi } from "../render/markdownToAnsi.js";
 import { copyToClipboard } from "./clipboard.js";
+import { documentStats, formatDocumentStats, type DocumentStats } from "./documentStats.js";
 import { decideFinderKey, type VimMode } from "./finderKeys.js";
+import { closestSearchMatchIndex, findSearchMatches, wrapSearchMatchIndex, type SearchMatch } from "./search.js";
 import { footerText, helpPanelText, modeLabel } from "./text.js";
+import { extractToc, formatToc, type TocEntry } from "./toc.js";
 
-export interface TuiOptions {
+export interface TuiOptions extends MduiConfig {
   readonly rootDirectory: string;
 }
 
@@ -46,6 +54,12 @@ interface TuiState {
   documentLines: readonly string[];
   documentSearchActive: boolean;
   documentSearchQuery: string;
+  searchMatches: readonly SearchMatch[];
+  searchMatchIndex: number;
+  searchConfirmed: boolean;
+  documentStats: DocumentStats;
+  tocEntries: readonly TocEntry[];
+  tocVisible: boolean;
   cursorLine: number;
   cursorColumn: number;
   cursorViewportRow: number;
@@ -60,7 +74,12 @@ interface TuiState {
 }
 
 export async function runTui(options: TuiOptions): Promise<void> {
-  const files = await discoverMarkdownFiles({ rootDirectory: options.rootDirectory });
+  const files = await discoverMarkdownFiles({
+    rootDirectory: options.rootDirectory,
+    ...(options.includeHidden !== undefined ? { includeHidden: options.includeHidden } : {}),
+    ...(options.maxDepth !== undefined ? { maxDepth: options.maxDepth } : {}),
+    ...(options.ignoredDirectories !== undefined ? { ignoredDirectories: options.ignoredDirectories } : {}),
+  });
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,
     targetFps: 60,
@@ -83,6 +102,10 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (noticeTimer !== undefined) {
       clearTimeout(noticeTimer);
     }
+    if (reloadTimer !== undefined) {
+      clearTimeout(reloadTimer);
+    }
+    closeCurrentFileWatcher();
     renderer.setTerminalTitle("");
     renderer.destroy();
   };
@@ -101,6 +124,12 @@ export async function runTui(options: TuiOptions): Promise<void> {
     documentLines: [],
     documentSearchActive: false,
     documentSearchQuery: "",
+    searchMatches: [],
+    searchMatchIndex: -1,
+    searchConfirmed: false,
+    documentStats: documentStats(""),
+    tocEntries: [],
+    tocVisible: false,
     cursorLine: 0,
     cursorColumn: 0,
     cursorViewportRow: 0,
@@ -116,6 +145,10 @@ export async function runTui(options: TuiOptions): Promise<void> {
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   let noticeVersion = 0;
   const documentPositions = new Map<string, DocumentPosition>();
+  const backStack: MarkdownFile[] = [];
+  const forwardStack: MarkdownFile[] = [];
+  let currentFileWatcher: FSWatcher | undefined;
+  let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
   renderer._internalKeyInput.onInternal("keypress", (key: KeyEvent) => {
     if (state.route.type === "document" && !state.helpVisible && !state.documentSearchActive && isCopyKey(key)) {
@@ -190,6 +223,43 @@ export async function runTui(options: TuiOptions): Promise<void> {
     width: "100%",
   });
   helpPanelScroll.add(helpPanelBody);
+
+  const tocPanel = new BoxRenderable(renderer, {
+    id: "mdui-toc-panel",
+    position: "absolute",
+    top: 2,
+    left: 4,
+    width: 72,
+    height: 24,
+    zIndex: 80,
+    border: true,
+    borderStyle: "rounded",
+    borderColor: "#C4A7E7",
+    backgroundColor: "#111827",
+    title: " Table of contents ",
+    padding: 1,
+    visible: false,
+  });
+  renderer.root.add(tocPanel);
+
+  const tocPanelScroll = new ScrollBoxRenderable(renderer, {
+    id: "mdui-toc-panel-scroll",
+    width: "100%",
+    height: "100%",
+    scrollY: true,
+    scrollX: false,
+    viewportCulling: false,
+  });
+  tocPanel.add(tocPanelScroll);
+
+  const tocPanelBody = new TextRenderable(renderer, {
+    id: "mdui-toc-panel-body",
+    content: "",
+    fg: "#E5E7EB",
+    bg: "#111827",
+    width: "100%",
+  });
+  tocPanelScroll.add(tocPanelBody);
 
   const header = new TextRenderable(renderer, {
     id: "mdui-header",
@@ -294,6 +364,33 @@ export async function runTui(options: TuiOptions): Promise<void> {
   });
   viewerMarkdown.selectable = true;
 
+  const searchHighlightOverlays = Array.from({ length: 96 }, (_, index) => {
+    const overlay = new TextRenderable(renderer, {
+      id: `mdui-search-highlight-${index}`,
+      content: "",
+      position: "absolute",
+      top: 0,
+      left: 0,
+      zIndex: 70,
+      fg: "#111827",
+      bg: "#FDE68A",
+      visible: false,
+    });
+    renderer.root.add(overlay);
+    return overlay;
+  });
+
+  viewerMarkdown.onMouseUp = (event: MouseEvent) => {
+    if (event.button !== MouseButton.LEFT || state.helpVisible || state.tocVisible || state.route.type !== "document") {
+      return;
+    }
+    const handled = openLinkAtScreenPosition(event.x, event.y);
+    if (handled) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
   const lineNumbers = new TextRenderable(renderer, {
     id: "mdui-line-numbers",
     content: "",
@@ -351,6 +448,27 @@ export async function runTui(options: TuiOptions): Promise<void> {
       return;
     }
 
+    if (state.tocVisible && isOverlayCloseKey(key)) {
+      state.tocVisible = false;
+      refreshChrome();
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
+
+    if (state.tocVisible && isHelpScrollKey(key)) {
+      scrollTocPanel(key);
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
+
+    if (state.tocVisible && !(key.ctrl && key.name === "c")) {
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
+
     const resetGoPrefix = state.goPrefixActive && !(state.route.type === "document" && key.name === "g" && !key.ctrl && !key.meta);
     if (resetGoPrefix) {
       state.goPrefixActive = false;
@@ -381,6 +499,12 @@ export async function runTui(options: TuiOptions): Promise<void> {
         state.documentLines = [];
         state.documentSearchActive = false;
         state.documentSearchQuery = "";
+        state.searchConfirmed = false;
+        state.searchMatches = [];
+        state.searchMatchIndex = -1;
+        state.documentStats = documentStats("");
+        state.tocEntries = [];
+        state.tocVisible = false;
         state.cursorLine = 0;
         state.cursorColumn = 0;
         state.cursorViewportRow = 0;
@@ -393,6 +517,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
         renderer.setTerminalTitle("MDUI");
         viewer.title = " Preview ";
         viewerMarkdown.content = "Select a Markdown file and press Enter.";
+        closeCurrentFileWatcher();
         refreshChrome();
         applySidebarVisibility();
         finder.focus();
@@ -403,6 +528,10 @@ export async function runTui(options: TuiOptions): Promise<void> {
         state.sidebarVisible = true;
         state.documentSearchActive = false;
         state.documentSearchQuery = "";
+        state.searchConfirmed = false;
+        state.searchMatches = [];
+        state.searchMatchIndex = -1;
+        state.tocVisible = false;
         refreshChrome();
         applySidebarVisibility();
         updateDocumentCursor();
@@ -417,6 +546,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
         if (state.sidebarVisible) {
           state.documentSearchActive = false;
           state.documentSearchQuery = "";
+          state.searchConfirmed = false;
+          state.searchMatches = [];
+          state.searchMatchIndex = -1;
           finder.focus();
         } else {
           viewer.focus();
@@ -488,6 +620,26 @@ export async function runTui(options: TuiOptions): Promise<void> {
         key.preventDefault();
         key.stopPropagation();
         return;
+      case "navigateBack":
+        navigateHistory("back");
+        resetCountPrefix();
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      case "navigateForward":
+        navigateHistory("forward");
+        resetCountPrefix();
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      case "toggleToc":
+        state.tocVisible = !state.tocVisible;
+        tocPanelScroll.scrollTop = 0;
+        resetCountPrefix();
+        refreshChrome();
+        key.preventDefault();
+        key.stopPropagation();
+        return;
       case "toggleHelp":
         state.helpVisible = !state.helpVisible;
         state.goPrefixActive = false;
@@ -495,6 +647,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
         if (state.helpVisible) {
           state.documentSearchActive = false;
           state.documentSearchQuery = "";
+          state.searchConfirmed = false;
+          state.searchMatches = [];
+          state.searchMatchIndex = -1;
           helpPanelScroll.scrollTop = 0;
           renderer.clearSelection();
         }
@@ -506,6 +661,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
         state.countPrefix = "";
         state.documentSearchActive = true;
         state.documentSearchQuery = "";
+        state.searchConfirmed = false;
+        state.searchMatches = [];
+        state.searchMatchIndex = -1;
         renderer.clearSelection();
         refreshChrome();
         key.preventDefault();
@@ -521,9 +679,37 @@ export async function runTui(options: TuiOptions): Promise<void> {
         state.countPrefix = "";
         state.documentSearchActive = false;
         state.documentSearchQuery = "";
+        state.searchConfirmed = false;
+        state.searchMatches = [];
+        state.searchMatchIndex = -1;
         renderer.clearSelection();
         refreshChrome();
         updateDocumentCursor();
+        key.preventDefault();
+        return;
+      case "confirmDocumentSearch":
+        state.documentSearchActive = false;
+        state.searchConfirmed = true;
+        state.searchMatches = findAllSearchMatches(state.documentSearchQuery);
+        if (state.searchMatches.length > 0) {
+          navigateToMatch(closestSearchMatchIndex(state.searchMatches, state.cursorLine, state.cursorColumn));
+        }
+        state.countPrefix = "";
+        refreshChrome();
+        key.preventDefault();
+        return;
+      case "nextSearchMatch":
+        if (state.searchMatches.length > 0) {
+          navigateToMatch(wrapSearchMatchIndex(state.searchMatchIndex + 1, state.searchMatches.length));
+        }
+        resetCountPrefix();
+        key.preventDefault();
+        return;
+      case "previousSearchMatch":
+        if (state.searchMatches.length > 0) {
+          navigateToMatch(wrapSearchMatchIndex(state.searchMatchIndex - 1, state.searchMatches.length));
+        }
+        resetCountPrefix();
         key.preventDefault();
         return;
       case "moveCursorLeft":
@@ -615,6 +801,18 @@ export async function runTui(options: TuiOptions): Promise<void> {
         rememberCurrentDocumentPosition();
         key.preventDefault();
         return;
+      case "jumpToLine":
+        state.goPrefixActive = false;
+        state.countPrefix = "";
+        state.cursorLine = clamp(decision.line - 1, 0, Math.max(0, state.documentLines.length - 1));
+        state.cursorColumn = 0;
+        ensureCursorVisible();
+        refreshChrome();
+        updateDocumentCursor();
+        updateVisualSelection();
+        rememberCurrentDocumentPosition();
+        key.preventDefault();
+        return;
       case "clearFilter":
         state.countPrefix = "";
         state.filterActive = false;
@@ -663,7 +861,16 @@ export async function runTui(options: TuiOptions): Promise<void> {
       return;
     }
     rememberCurrentDocumentPosition();
-    state.route = { type: "document", file: selected.file };
+    await openDocument(selected.file, { pushHistory: false });
+  }
+
+  async function openDocument(file: MarkdownFile, options: { readonly pushHistory: boolean }): Promise<void> {
+    if (options.pushHistory && state.route.type === "document") {
+      rememberCurrentDocumentPosition();
+      backStack.push(state.route.file);
+      forwardStack.splice(0);
+    }
+    state.route = { type: "document", file };
     state.filterActive = false;
     state.sidebarVisible = false;
     state.vimMode = "normal";
@@ -673,21 +880,30 @@ export async function runTui(options: TuiOptions): Promise<void> {
     state.visualAnchorColumn = 0;
     state.goPrefixActive = false;
     state.countPrefix = "";
+    state.tocVisible = false;
     renderer.clearSelection();
-    const markdown = await readFile(selected.file.absolutePath, "utf8");
-    const width = Math.max(40, renderer.terminalWidth - 8);
-    const rendered = renderMarkdownToAnsi(markdown, { width, color: false });
-    viewer.title = ` ${basename(selected.file.relativePath)} `;
-    renderer.setTerminalTitle(`MDUI - ${selected.file.relativePath}`);
-    state.documentText = rendered;
-    state.markdownSource = markdown;
-    state.documentLines = rendered.split("\n");
-    restoreDocumentPosition(selected.file.absolutePath);
-    viewerMarkdown.content = markdown;
+    await loadDocument(file);
     refreshChrome();
     applySidebarVisibility();
     await placeDocumentCursorAfterLayout();
     viewer.focus();
+    watchCurrentFile(file);
+  }
+
+  async function loadDocument(file: MarkdownFile): Promise<void> {
+    const markdown = await readFile(file.absolutePath, "utf8");
+    const width = Math.max(40, renderer.terminalWidth - 8);
+    const rendered = renderMarkdownToAnsi(markdown, { width, color: false });
+    viewer.title = ` ${basename(file.relativePath)} `;
+    renderer.setTerminalTitle(`MDUI - ${file.relativePath}`);
+    state.documentText = rendered;
+    state.markdownSource = markdown;
+    state.documentLines = rendered.split("\n");
+    state.documentStats = documentStats(markdown);
+    state.tocEntries = extractToc(markdown);
+    state.searchMatches = state.searchConfirmed ? findAllSearchMatches(state.documentSearchQuery) : [];
+    restoreDocumentPosition(file.absolutePath);
+    viewerMarkdown.content = markdown;
   }
 
   async function placeDocumentCursorAfterLayout(): Promise<void> {
@@ -709,7 +925,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
     lineNumbers.visible = state.route.type === "document";
     lineNumbers.content = state.route.type === "document" ? lineNumberText(state.documentLines.length) : "";
     helpPanel.visible = state.helpVisible;
+    tocPanel.visible = state.tocVisible;
+    tocPanelBody.content = formatToc(state.tocEntries);
     layoutHelpPanel();
+    layoutTocPanel();
+    updateSearchHighlightOverlay();
   }
 
   function repeatCount(): number {
@@ -737,6 +957,16 @@ export async function runTui(options: TuiOptions): Promise<void> {
     helpPanel.top = Math.max(1, Math.floor((renderer.terminalHeight - panelHeight) / 2));
   }
 
+  function layoutTocPanel(): void {
+    const panelWidth = clamp(72, 36, Math.max(36, renderer.terminalWidth - 6));
+    const panelHeight = clamp(24, 12, Math.max(12, renderer.terminalHeight - 6));
+    tocPanel.width = panelWidth;
+    tocPanel.height = panelHeight;
+    tocPanelScroll.height = Math.max(1, panelHeight - 4);
+    tocPanel.left = Math.max(1, Math.floor((renderer.terminalWidth - panelWidth) / 2));
+    tocPanel.top = Math.max(1, Math.floor((renderer.terminalHeight - panelHeight) / 2));
+  }
+
   function scrollHelpPanel(key: KeyEvent): void {
     if (key.name === "up" || key.name === "k") {
       helpPanelScroll.scrollBy(-1, "step");
@@ -753,6 +983,54 @@ export async function runTui(options: TuiOptions): Promise<void> {
     helpPanelScroll.scrollBy(0.5, "viewport");
   }
 
+  function scrollTocPanel(key: KeyEvent): void {
+    if (key.name === "up" || key.name === "k") {
+      tocPanelScroll.scrollBy(-1, "step");
+      return;
+    }
+    if (key.name === "down" || key.name === "j") {
+      tocPanelScroll.scrollBy(1, "step");
+      return;
+    }
+    if (key.ctrl && key.name === "u") {
+      tocPanelScroll.scrollBy(-0.5, "viewport");
+      return;
+    }
+    tocPanelScroll.scrollBy(0.5, "viewport");
+  }
+
+  function updateSearchHighlightOverlay(): void {
+    hideSearchHighlightOverlays();
+    if (state.route.type !== "document" || state.sidebarVisible || state.documentSearchQuery.length === 0 || state.searchMatches.length === 0) {
+      return;
+    }
+    let overlayIndex = 0;
+    for (const [matchIndex, match] of state.searchMatches.entries()) {
+      const position = cursorScreenPosition(match.line, match.column);
+      if (position === undefined) {
+        continue;
+      }
+      const overlay = searchHighlightOverlays[overlayIndex];
+      if (overlay === undefined) {
+        return;
+      }
+      overlay.left = position.x;
+      overlay.top = position.y;
+      overlay.bg = matchIndex === state.searchMatchIndex ? "#FDE68A" : "#334155";
+      overlay.fg = matchIndex === state.searchMatchIndex ? "#111827" : "#E5E7EB";
+      overlay.content = (state.documentLines[match.line] ?? "").slice(match.column, match.column + match.length);
+      overlay.visible = true;
+      overlayIndex += 1;
+    }
+  }
+
+  function hideSearchHighlightOverlays(): void {
+    for (const overlay of searchHighlightOverlays) {
+      overlay.visible = false;
+      overlay.content = "";
+    }
+  }
+
   function rememberCurrentDocumentPosition(): void {
     if (state.route.type !== "document") {
       return;
@@ -762,6 +1040,61 @@ export async function runTui(options: TuiOptions): Promise<void> {
       cursorColumn: 0,
       scrollTop: viewer.scrollTop,
     });
+  }
+
+  function navigateHistory(direction: "back" | "forward"): void {
+    if (state.route.type !== "document") {
+      return;
+    }
+    const sourceStack = direction === "back" ? backStack : forwardStack;
+    const target = sourceStack.pop();
+    if (target === undefined) {
+      showNotice(direction === "back" ? "No previous document" : "No next document");
+      return;
+    }
+    rememberCurrentDocumentPosition();
+    const destinationStack = direction === "back" ? forwardStack : backStack;
+    destinationStack.push(state.route.file);
+    void openDocument(target, { pushHistory: false }).catch((error: unknown) => {
+      showNotice(error instanceof Error ? `Navigation failed: ${error.message}` : "Navigation failed");
+    });
+  }
+
+  function watchCurrentFile(file: MarkdownFile): void {
+    closeCurrentFileWatcher();
+    try {
+      currentFileWatcher = watch(file.absolutePath, { persistent: false }, () => {
+        if (reloadTimer !== undefined) {
+          clearTimeout(reloadTimer);
+        }
+        reloadTimer = setTimeout(() => {
+          void reloadCurrentDocument(file).catch((error: unknown) => {
+            showNotice(error instanceof Error ? `Reload failed: ${error.message}` : "Reload failed");
+          });
+        }, 100);
+      });
+    } catch (error) {
+      showNotice(error instanceof Error ? `Watch disabled: ${error.message}` : "Watch disabled");
+    }
+  }
+
+  function closeCurrentFileWatcher(): void {
+    if (currentFileWatcher === undefined) {
+      return;
+    }
+    currentFileWatcher.close();
+    currentFileWatcher = undefined;
+  }
+
+  async function reloadCurrentDocument(file: MarkdownFile): Promise<void> {
+    if (state.route.type !== "document" || state.route.file.absolutePath !== file.absolutePath) {
+      return;
+    }
+    rememberCurrentDocumentPosition();
+    await loadDocument(file);
+    refreshChrome();
+    await placeDocumentCursorAfterLayout();
+    showNotice("Reloaded current file");
   }
 
   function restoreDocumentPosition(absolutePath: string): void {
@@ -787,7 +1120,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
     readonly selectionAnchorLine?: number;
     readonly selectionAnchorColumn?: number;
     readonly searchQuery?: string;
+    readonly searchMatch?: string;
     readonly countPrefix?: string;
+    readonly documentStats?: string;
   } {
     const footer = {
       vimMode: state.vimMode,
@@ -798,7 +1133,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
       ...(state.route.type === "document" ? { cursorLine: state.cursorLine, cursorColumn: state.cursorColumn } : {}),
       ...(state.vimMode !== "normal" ? { selectionAnchorLine: state.visualAnchorLine, selectionAnchorColumn: state.visualAnchorColumn } : {}),
       ...(state.documentSearchActive ? { searchQuery: state.documentSearchQuery } : {}),
+      ...(state.searchMatches.length > 0 ? { searchMatch: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` } : {}),
       ...(state.countPrefix.length > 0 ? { countPrefix: state.countPrefix } : {}),
+      ...(state.route.type === "document" ? { documentStats: formatDocumentStats(state.documentStats) } : {}),
     };
   }
 
@@ -827,24 +1164,52 @@ export async function runTui(options: TuiOptions): Promise<void> {
     rememberCurrentDocumentPosition();
   }
 
+  function findAllSearchMatches(query: string): readonly SearchMatch[] {
+    return findSearchMatches(state.documentLines, query);
+  }
+
+  function navigateToMatch(index: number): void {
+    if (state.searchMatches.length === 0) {
+      return;
+    }
+    state.searchMatchIndex = index;
+    const match = state.searchMatches[index];
+    if (match === undefined) {
+      return;
+    }
+    state.cursorLine = match.line;
+    state.cursorColumn = match.column;
+    ensureCursorVisible();
+    updateSearchSelection();
+    rememberCurrentDocumentPosition();
+    refreshChrome();
+    updateDocumentCursor();
+  }
+
   function moveCursorToSearchMatch(): void {
-    const query = state.documentSearchQuery.toLowerCase();
+    const query = state.documentSearchQuery;
     if (query.length === 0) {
+      state.searchMatches = [];
+      state.searchMatchIndex = -1;
       renderer.clearSelection();
       return;
     }
-    for (const [lineIndex, line] of state.documentLines.entries()) {
-      const columnIndex = line.toLowerCase().indexOf(query);
-      if (columnIndex >= 0) {
-        state.cursorLine = lineIndex;
-        state.cursorColumn = columnIndex;
-        ensureCursorVisible();
-        updateSearchSelection();
-        rememberCurrentDocumentPosition();
-        return;
-      }
+    state.searchMatches = findAllSearchMatches(query);
+    if (state.searchMatches.length === 0) {
+      state.searchMatchIndex = -1;
+      renderer.clearSelection();
+      return;
     }
-    renderer.clearSelection();
+    state.searchMatchIndex = 0;
+    const match = state.searchMatches[0];
+    if (match === undefined) {
+      return;
+    }
+    state.cursorLine = match.line;
+    state.cursorColumn = match.column;
+    ensureCursorVisible();
+    updateSearchSelection();
+    rememberCurrentDocumentPosition();
   }
 
   function ensureCursorVisible(): void {
@@ -903,7 +1268,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function updateSearchSelection(): void {
-    if (!state.documentSearchActive || state.documentSearchQuery.length === 0 || state.sidebarVisible) {
+    if ((!state.documentSearchActive && !state.searchConfirmed) || state.documentSearchQuery.length === 0 || state.sidebarVisible) {
       return;
     }
     const start = cursorScreenPosition(state.cursorLine, state.cursorColumn);
@@ -965,14 +1330,47 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (state.route.type !== "document") {
       return;
     }
-    const renderedLine = state.documentLines[state.cursorLine] ?? "";
     const sourceLine = state.markdownSource.split("\n")[state.cursorLine] ?? "";
-    const url = firstUrlInText(renderedLine) ?? firstMarkdownLinkUrl(sourceLine) ?? firstUrlInText(sourceLine);
-    if (url === undefined) {
+    const link = firstDocumentLink(sourceLine) ?? firstDocumentLink(state.documentLines[state.cursorLine] ?? "");
+    if (link === undefined) {
       showNotice("No link on current line");
       return;
     }
-    openUrlInBrowser(url);
+    if (link.kind === "external") {
+      openUrlInBrowser(link.url);
+      return;
+    }
+    const targetFile = resolveInternalMarkdownFile(files, state.route.file, link.target);
+    if (targetFile === undefined) {
+      showNotice(`No Markdown file found for ${link.target}`);
+      return;
+    }
+    void openDocument(targetFile, { pushHistory: true }).catch((error: unknown) => {
+      showNotice(error instanceof Error ? `Open link failed: ${error.message}` : "Open link failed");
+    });
+  }
+
+  function openLinkAtScreenPosition(x: number, y: number): boolean {
+    if (state.route.type !== "document") {
+      return false;
+    }
+    const line = viewer.scrollTop + (y - viewerMarkdown.screenY);
+    if (line < 0 || line >= state.documentLines.length) {
+      return false;
+    }
+    const previousLine = state.cursorLine;
+    const previousColumn = state.cursorColumn;
+    state.cursorLine = line;
+    state.cursorColumn = Math.max(0, x - viewerMarkdown.screenX);
+    const sourceLine = state.markdownSource.split("\n")[line] ?? "";
+    const link = firstDocumentLink(sourceLine) ?? firstDocumentLink(state.documentLines[line] ?? "");
+    if (link === undefined) {
+      state.cursorLine = previousLine;
+      state.cursorColumn = previousColumn;
+      return false;
+    }
+    openCurrentLineLink();
+    return true;
   }
 
   function openUrlInBrowser(url: string): void {
@@ -999,7 +1397,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
       return;
     }
     showNotice("Exporting PDF…");
-    const outputPath = await exportMarkdownToPdf(state.markdownSource, state.route.file.absolutePath);
+    const outputPath = await exportMarkdownToPdf(state.markdownSource, state.route.file.absolutePath, {
+      ...(options.pdfOutputDirectory !== undefined ? { outputDirectory: options.pdfOutputDirectory } : {}),
+    });
     showNotice(`Saved ${basename(outputPath)}`);
   }
 
@@ -1047,26 +1447,16 @@ function isHelpCloseKey(key: KeyEvent): boolean {
   return key.name === "escape" || (!key.ctrl && !key.meta && key.name === "q") || isHelpToggleInput(key);
 }
 
+function isOverlayCloseKey(key: KeyEvent): boolean {
+  return key.name === "escape" || (!key.ctrl && !key.meta && key.name === "q");
+}
+
 function isHelpScrollKey(key: KeyEvent): boolean {
   return key.name === "up" || key.name === "down" || key.name === "j" || key.name === "k" || (key.ctrl && (key.name === "d" || key.name === "u"));
 }
 
 function isHelpToggleInput(key: KeyEvent): boolean {
   return key.ctrl && (key.name === "?" || key.name === "/" || key.sequence === "\u001F" || key.raw === "\u001F");
-}
-
-function firstMarkdownLinkUrl(text: string): string | undefined {
-  const match = /\[[^\]]+\]\((https?:\/\/[^\s)]+)\)/.exec(text);
-  return normalizeHttpUrl(match?.[1]);
-}
-
-function firstUrlInText(text: string): string | undefined {
-  const match = /(?:https?:\/\/[^\s)]+|www\.[^\s)]+)/.exec(text);
-  if (match === null) {
-    return undefined;
-  }
-  const url = match[0].replace(/[.,;:!?]+$/, "");
-  return normalizeHttpUrl(url.startsWith("www.") ? `https://${url}` : url);
 }
 
 function browserOpenCommand(url: string): { readonly executable: string; readonly args: readonly string[] } | undefined {

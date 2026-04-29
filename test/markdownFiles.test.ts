@@ -32,6 +32,18 @@ describe("markdown file discovery", () => {
     expect(files.map((file) => file.relativePath).sort()).toEqual(["README.md", join("docs", "guide.markdown")].sort());
   });
 
+  it("skips additional ignored directories from config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mdui-"));
+    tempRoots.push(root);
+    await mkdir(join(root, "vendor"));
+    await writeFile(join(root, "README.md"), "# Readme");
+    await writeFile(join(root, "vendor", "ignored.md"), "# Ignored");
+
+    const files = await discoverMarkdownFiles({ rootDirectory: root, ignoredDirectories: ["vendor"] });
+
+    expect(files.map((file) => file.relativePath)).toEqual(["README.md"]);
+  });
+
   it("skips unreadable directories and missing files without aborting discovery", async () => {
     const root = "/workspace";
     const stats = makeStats();

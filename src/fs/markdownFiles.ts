@@ -13,6 +13,7 @@ export interface DiscoverOptions {
   readonly rootDirectory: string;
   readonly includeHidden?: boolean;
   readonly maxDepth?: number;
+  readonly ignoredDirectories?: readonly string[];
   readonly fileSystem?: MarkdownFileSystem;
 }
 
@@ -34,7 +35,7 @@ export interface FileStat {
 }
 
 const markdownExtensions = new Set([".md", ".markdown", ".mdown", ".mkdn", ".mkd"]);
-const ignoredDirectories = new Set([".git", "node_modules", "dist", "build", ".next", "coverage", ".turbo"]);
+const defaultIgnoredDirectories = [".git", "node_modules", "dist", "build", ".next", "coverage", ".turbo"];
 const defaultFileSystem: MarkdownFileSystem = {
   readdir: (path) => readdir(path, { withFileTypes: true }),
   stat,
@@ -47,8 +48,9 @@ export function isMarkdownPath(path: string): boolean {
 export async function discoverMarkdownFiles(options: DiscoverOptions): Promise<readonly MarkdownFile[]> {
   const maxDepth = options.maxDepth ?? 8;
   const fileSystem = options.fileSystem ?? defaultFileSystem;
+  const ignoredDirectories = new Set([...(options.ignoredDirectories ?? []), ...defaultIgnoredDirectories]);
   const files: MarkdownFile[] = [];
-  await walk(options.rootDirectory, options.rootDirectory, files, { includeHidden: options.includeHidden ?? false, maxDepth }, fileSystem, 0);
+  await walk(options.rootDirectory, options.rootDirectory, files, { includeHidden: options.includeHidden ?? false, maxDepth, ignoredDirectories }, fileSystem, 0);
   return files.sort((left, right) => right.modifiedAt.getTime() - left.modifiedAt.getTime());
 }
 
@@ -56,7 +58,7 @@ async function walk(
   rootDirectory: string,
   currentDirectory: string,
   files: MarkdownFile[],
-  options: Required<Pick<DiscoverOptions, "includeHidden" | "maxDepth">>,
+  options: Required<Pick<DiscoverOptions, "includeHidden" | "maxDepth">> & { readonly ignoredDirectories: ReadonlySet<string> },
   fileSystem: MarkdownFileSystem,
   depth: number,
 ): Promise<void> {
@@ -67,7 +69,7 @@ async function walk(
   const entries = await readDirectoryOrSkip(fileSystem, currentDirectory);
   await Promise.all(
     entries.map(async (entry) => {
-      if (shouldIgnore(entry.name, options.includeHidden)) {
+      if (shouldIgnore(entry.name, options.includeHidden, options.ignoredDirectories)) {
         return;
       }
 
@@ -130,7 +132,7 @@ export function isSkippableFileSystemError(error: unknown): boolean {
   return code === "EACCES" || code === "EPERM" || code === "ENOENT" || code === "ENOTDIR" || code === "ETIMEDOUT";
 }
 
-function shouldIgnore(name: string, includeHidden: boolean): boolean {
+function shouldIgnore(name: string, includeHidden: boolean, ignoredDirectories: ReadonlySet<string>): boolean {
   if (ignoredDirectories.has(name)) {
     return true;
   }

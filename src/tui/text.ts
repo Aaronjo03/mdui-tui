@@ -8,7 +8,9 @@ export interface FooterState {
   readonly selectionAnchorLine?: number;
   readonly selectionAnchorColumn?: number;
   readonly searchQuery?: string;
+  readonly searchMatch?: string;
   readonly countPrefix?: string;
+  readonly documentStats?: string;
 }
 
 export function footerText(notice: string, state: FooterState = {}): string {
@@ -20,9 +22,11 @@ export function footerText(notice: string, state: FooterState = {}): string {
     state.selectionAnchorLine !== undefined && state.selectionAnchorColumn !== undefined && state.cursorLine !== undefined && state.cursorColumn !== undefined
       ? ` • ${state.selectionAnchorLine}:${state.selectionAnchorColumn}→${state.cursorLine}:${state.cursorColumn}`
       : "";
-  const search = state.searchQuery !== undefined ? ` • /${state.searchQuery}_` : "";
+  const matchInfo = state.searchMatch !== undefined ? ` [${state.searchMatch}]` : "";
+  const search = state.searchQuery !== undefined ? ` • /${state.searchQuery}_${matchInfo}` : matchInfo.length > 0 ? ` • search${matchInfo}` : "";
   const count = state.countPrefix !== undefined && state.countPrefix.length > 0 ? ` • count ${state.countPrefix}` : "";
-  const base = `${modeLabel(vimMode)}${cursor}${selection}${search}${count} • arrows/hjkl move • 8j counts • y yank visual • o open link • ${sidebarHelp} • Ctrl-y Slack • Ctrl-p PDF • / search • Ctrl-/ help • q quit`;
+  const stats = state.documentStats !== undefined ? ` • ${state.documentStats}` : "";
+  const base = `${modeLabel(vimMode)}${cursor}${selection}${search}${count}${stats} • arrows/hjkl move • 8j counts • y yank visual • o open link • t ToC • ${sidebarHelp} • Ctrl-y Slack • Ctrl-p PDF • / search • Ctrl-/ help • q quit`;
   return notice.length > 0 ? `${base} • ${notice}` : base;
 }
 
@@ -57,10 +61,15 @@ Document keys:
   8j / 4k / 5l     Prefix motions with a count
   Ctrl-d / Ctrl-u  Scroll half a page
   Ctrl-f / Ctrl-b  Scroll a page
-  gg / G           Jump to top / bottom
+  gg / G / 42G     Jump to top / bottom / line
   Tab              Toggle file sidebar
   Esc              Clear search, exit visual mode, or reopen sidebar
   /                Search document when sidebar is hidden; filter files when visible
+  Enter            Confirm search (after /)
+  n                Next search match
+  p or N           Previous search match
+  t                Toggle table of contents overlay
+  Ctrl-o / Ctrl-i  Navigate back / forward through internal Markdown links
   v / Ctrl-v       Read-only visual / visual-block selection
   y                Yank visual / visual-block selection and clear highlight
   c                Copy highlighted text, or the document if nothing is highlighted
@@ -90,10 +99,15 @@ Document
   8j / 4k / 5l     Prefix motions with a count
   Ctrl-d / Ctrl-u  Scroll half a page
   Ctrl-f / Ctrl-b  Scroll a page
-  gg / G           Jump to top / bottom
+  gg / G / 42G     Jump to top / bottom / line
   Tab              Toggle file sidebar
   Esc              Clear search, exit visual mode, or reopen sidebar
   /                Search document fullscreen; filter files with sidebar open
+  Enter            Confirm search (after /)
+  n                Next search match
+  p or N           Previous search match
+  t                Toggle table of contents overlay
+  Ctrl-o / Ctrl-i  Navigate back / forward through internal Markdown links
   v / Ctrl-v       Visual / visual-block selection
   y                Yank visual / visual-block selection and clear highlight
   c                Copy highlighted text, or the whole document
