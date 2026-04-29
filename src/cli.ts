@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { discoverMduiConfig } from "./config/config.js";
 import { isMarkdownPath } from "./fs/markdownFiles.js";
 import { renderMarkdownToAnsi } from "./render/markdownToAnsi.js";
 import { runTui } from "./tui/runTui.js";
@@ -28,7 +29,8 @@ async function main(args: readonly string[]): Promise<number> {
     return 1;
   }
 
-  await runTui({ rootDirectory: process.cwd() });
+  const config = await discoverMduiConfig(process.cwd());
+  await runTui({ rootDirectory: process.cwd(), ...config.config });
   return 0;
 }
 
