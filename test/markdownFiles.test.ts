@@ -57,6 +57,29 @@ describe("markdown file discovery", () => {
 
     expect(files.map((file) => file.relativePath)).toEqual(["README.md"]);
   });
+
+  it("skips directories that time out (network mounts) without aborting discovery", async () => {
+    const root = "/workspace";
+    const stats = makeStats();
+    const fileSystem: MarkdownFileSystem = {
+      async readdir(path) {
+        if (path === root) {
+          return [dirEntry("cloud-mount"), fileEntry("local.md")];
+        }
+        if (path === join(root, "cloud-mount")) {
+          throw Object.assign(new Error("connection timed out"), { code: "ETIMEDOUT" });
+        }
+        return [];
+      },
+      async stat() {
+        return stats;
+      },
+    };
+
+    const files = await discoverMarkdownFiles({ rootDirectory: root, fileSystem });
+
+    expect(files.map((file) => file.relativePath)).toEqual(["local.md"]);
+  });
 });
 
 function fileEntry(name: string): DirectoryEntry {

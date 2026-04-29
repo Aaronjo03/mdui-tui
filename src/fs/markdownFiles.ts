@@ -127,7 +127,7 @@ export function isSkippableFileSystemError(error: unknown): boolean {
     return false;
   }
   const code = error.code;
-  return code === "EACCES" || code === "EPERM" || code === "ENOENT" || code === "ENOTDIR";
+  return code === "EACCES" || code === "EPERM" || code === "ENOENT" || code === "ENOTDIR" || code === "ETIMEDOUT";
 }
 
 function shouldIgnore(name: string, includeHidden: boolean): boolean {
