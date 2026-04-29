@@ -40,7 +40,7 @@ async function renderPdfDocumentUrl(markdown: string, title: string): Promise<st
 }
 
 async function renderPdfHtml(markdown: string, title: string): Promise<string> {
-  const body = await marked.parse(escapeRawHtmlOutsideFences(markdown), { gfm: true, breaks: false, renderer: pdfRenderer() });
+  const body = await marked.parse(markdown, { gfm: true, breaks: false, renderer: pdfRenderer() });
   return `<!doctype html>
 <html>
 <head>
@@ -99,6 +99,8 @@ function pdfRenderer(): Renderer<string, string> {
     }
     return `<span class="removed-image">[image removed: ${escapeHtml(altText)}]</span>`;
   };
+
+  renderer.html = ({ text }) => sanitizeRawHtml(text);
 
   return renderer;
 }
@@ -198,21 +200,17 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function escapeRawHtmlOutsideFences(markdown: string): string {
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
-  let inFence = false;
-
-  return lines
-    .map((line) => {
-      if (line.trimStart().startsWith("```")) {
-        inFence = !inFence;
-        return line;
-      }
-      return inFence ? line : escapeMarkdownHtml(line);
-    })
-    .join("\n");
+function sanitizeRawHtml(value: string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(safeRawHtmlTagPattern)) {
+    const tag = match[0];
+    parts.push(escapeHtml(value.slice(cursor, match.index)));
+    parts.push(tag);
+    cursor = match.index + tag.length;
+  }
+  parts.push(escapeHtml(value.slice(cursor)));
+  return parts.join("");
 }
 
-function escapeMarkdownHtml(value: string): string {
-  return value.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+const safeRawHtmlTagPattern = /<(?:br\s*\/|br|details|\/details|summary|\/summary)>/gi;
