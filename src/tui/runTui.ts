@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { spawn } from "node:child_process";
 import type { MduiConfig } from "../config/config.js";
 import {
@@ -24,6 +24,8 @@ import { filterFiles, type RankedFile } from "../finder/filterFiles.js";
 import { firstDocumentLink, resolveInternalMarkdownFile } from "../markdown/links.js";
 import { renderMarkdownToAnsi } from "../render/markdownToAnsi.js";
 import { copyToClipboard } from "./clipboard.js";
+import { syncCursorToViewportState } from "./cursorState.js";
+import { isStableFileSnapshot, shouldReloadFileByMtime } from "./fileReload.js";
 import { documentStats, formatDocumentStats, type DocumentStats } from "./documentStats.js";
 import { decideFinderKey, type VimMode } from "./finderKeys.js";
 import { closestSearchMatchIndex, findSearchMatches, wrapSearchMatchIndex, type SearchMatch } from "./search.js";
@@ -105,6 +107,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (reloadTimer !== undefined) {
       clearTimeout(reloadTimer);
     }
+    if (currentFilePollTimer !== undefined) {
+      clearInterval(currentFilePollTimer);
+    }
     closeCurrentFileWatcher();
     renderer.setTerminalTitle("");
     renderer.destroy();
@@ -149,6 +154,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
   const forwardStack: MarkdownFile[] = [];
   let currentFileWatcher: FSWatcher | undefined;
   let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+  let currentFilePollTimer: ReturnType<typeof setInterval> | undefined;
+  let currentFileLastReadMtimeMs: number | undefined;
+  let documentLoadGeneration = 0;
 
   renderer._internalKeyInput.onInternal("keypress", (key: KeyEvent) => {
     if (state.route.type === "document" && !state.helpVisible && !state.documentSearchActive && isCopyKey(key)) {
@@ -755,27 +763,19 @@ export async function runTui(options: TuiOptions): Promise<void> {
         key.preventDefault();
         return;
       case "scrollHalfPageDown":
-        viewer.scrollBy(0.5, "viewport");
-        updateDocumentCursor();
-        rememberCurrentDocumentPosition();
+        scrollDocumentBy(0.5);
         key.preventDefault();
         return;
       case "scrollHalfPageUp":
-        viewer.scrollBy(-0.5, "viewport");
-        updateDocumentCursor();
-        rememberCurrentDocumentPosition();
+        scrollDocumentBy(-0.5);
         key.preventDefault();
         return;
       case "scrollPageDown":
-        viewer.scrollBy(1, "viewport");
-        updateDocumentCursor();
-        rememberCurrentDocumentPosition();
+        scrollDocumentBy(1);
         key.preventDefault();
         return;
       case "scrollPageUp":
-        viewer.scrollBy(-1, "viewport");
-        updateDocumentCursor();
-        rememberCurrentDocumentPosition();
+        scrollDocumentBy(-1);
         key.preventDefault();
         return;
       case "scrollToTop":
@@ -882,34 +882,75 @@ export async function runTui(options: TuiOptions): Promise<void> {
     state.countPrefix = "";
     state.tocVisible = false;
     renderer.clearSelection();
-    await loadDocument(file);
+    const loaded = await loadDocument(file);
+    if (!loaded) {
+      return;
+    }
     refreshChrome();
     applySidebarVisibility();
+    watchCurrentFile(file);
     await placeDocumentCursorAfterLayout();
     viewer.focus();
-    watchCurrentFile(file);
   }
 
-  async function loadDocument(file: MarkdownFile): Promise<void> {
-    const markdown = await readFile(file.absolutePath, "utf8");
+  async function readStableDocument(file: MarkdownFile): Promise<{ readonly markdown: string; readonly mtimeMs: number }> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const before = await stat(file.absolutePath);
+      const markdown = await readFile(file.absolutePath, "utf8");
+      const after = await stat(file.absolutePath);
+      if (isStableFileSnapshot(before, after)) {
+        return { markdown, mtimeMs: after.mtimeMs };
+      }
+      await waitForStableFileRetry();
+    }
+    throw new Error("File changed while reading; waiting for stable snapshot");
+  }
+
+  async function waitForStableFileRetry(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+  }
+
+  async function loadDocument(file: MarkdownFile): Promise<boolean> {
+    const loadGeneration = ++documentLoadGeneration;
+    const snapshot = await readStableDocument(file);
+    if (!isCurrentDocumentLoad(file, loadGeneration)) {
+      return false;
+    }
     const width = Math.max(40, renderer.terminalWidth - 8);
-    const rendered = renderMarkdownToAnsi(markdown, { width, color: false });
+    const rendered = renderMarkdownToAnsi(snapshot.markdown, { width, color: false });
     viewer.title = ` ${basename(file.relativePath)} `;
     renderer.setTerminalTitle(`MDUI - ${file.relativePath}`);
     state.documentText = rendered;
-    state.markdownSource = markdown;
+    state.markdownSource = snapshot.markdown;
     state.documentLines = rendered.split("\n");
-    state.documentStats = documentStats(markdown);
-    state.tocEntries = extractToc(markdown);
+    state.documentStats = documentStats(snapshot.markdown);
+    state.tocEntries = extractToc(snapshot.markdown);
     state.searchMatches = state.searchConfirmed ? findAllSearchMatches(state.documentSearchQuery) : [];
+    currentFileLastReadMtimeMs = snapshot.mtimeMs;
     restoreDocumentPosition(file.absolutePath);
-    viewerMarkdown.content = markdown;
+    viewerMarkdown.content = snapshot.markdown;
+    return true;
+  }
+
+  function isCurrentDocumentLoad(file: MarkdownFile, loadGeneration: number): boolean {
+    return state.route.type === "document" && state.route.file.absolutePath === file.absolutePath && documentLoadGeneration === loadGeneration;
   }
 
   async function placeDocumentCursorAfterLayout(): Promise<void> {
     renderer.requestRender();
-    await renderer.idle();
+    await waitForRendererIdle();
     updateDocumentCursor();
+  }
+
+  async function waitForRendererIdle(): Promise<void> {
+    await Promise.race([
+      renderer.idle(),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 16);
+      }),
+    ]);
   }
 
   function refreshFinder(): void {
@@ -1037,7 +1078,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     }
     documentPositions.set(state.route.file.absolutePath, {
       cursorLine: state.cursorLine,
-      cursorColumn: 0,
+      cursorColumn: state.cursorColumn,
       scrollTop: viewer.scrollTop,
     });
   }
@@ -1062,8 +1103,13 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
   function watchCurrentFile(file: MarkdownFile): void {
     closeCurrentFileWatcher();
+    currentFilePollTimer = setInterval(() => {
+      void reloadCurrentDocument(file).catch((error: unknown) => {
+        showNotice(error instanceof Error ? `Reload failed: ${error.message}` : "Reload failed");
+      });
+    }, 500);
     try {
-      currentFileWatcher = watch(file.absolutePath, { persistent: false }, () => {
+      currentFileWatcher = watch(dirname(file.absolutePath), { persistent: false }, () => {
         if (reloadTimer !== undefined) {
           clearTimeout(reloadTimer);
         }
@@ -1079,6 +1125,14 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function closeCurrentFileWatcher(): void {
+    if (reloadTimer !== undefined) {
+      clearTimeout(reloadTimer);
+      reloadTimer = undefined;
+    }
+    if (currentFilePollTimer !== undefined) {
+      clearInterval(currentFilePollTimer);
+      currentFilePollTimer = undefined;
+    }
     if (currentFileWatcher === undefined) {
       return;
     }
@@ -1090,11 +1144,22 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (state.route.type !== "document" || state.route.file.absolutePath !== file.absolutePath) {
       return;
     }
+    if (!(await currentFileHasNewerMtime(file))) {
+      return;
+    }
     rememberCurrentDocumentPosition();
-    await loadDocument(file);
+    const loaded = await loadDocument(file);
+    if (!loaded) {
+      return;
+    }
     refreshChrome();
     await placeDocumentCursorAfterLayout();
     showNotice("Reloaded current file");
+  }
+
+  async function currentFileHasNewerMtime(file: MarkdownFile): Promise<boolean> {
+    const metadata = await stat(file.absolutePath);
+    return shouldReloadFileByMtime(metadata.mtimeMs, currentFileLastReadMtimeMs);
   }
 
   function restoreDocumentPosition(absolutePath: string): void {
@@ -1107,7 +1172,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
       return;
     }
     state.cursorLine = clamp(savedPosition.cursorLine, 0, Math.max(0, state.documentLines.length - 1));
-    state.cursorColumn = 0;
+    state.cursorColumn = clamp(savedPosition.cursorColumn, 0, lineLength(state.cursorLine));
     viewer.scrollTop = clamp(savedPosition.scrollTop, 0, Math.max(0, state.documentLines.length - 1));
     state.cursorViewportRow = clamp(state.cursorLine - viewer.scrollTop, 0, visibleDocumentRows() - 1);
   }
@@ -1158,6 +1223,15 @@ export async function runTui(options: TuiOptions): Promise<void> {
     state.cursorLine = nextLine;
     state.cursorColumn = nextColumn;
     ensureCursorVisible();
+    refreshChrome();
+    updateDocumentCursor();
+    updateVisualSelection();
+    rememberCurrentDocumentPosition();
+  }
+
+  function scrollDocumentBy(amount: number): void {
+    viewer.scrollBy(amount, "viewport");
+    syncCursorToViewport();
     refreshChrome();
     updateDocumentCursor();
     updateVisualSelection();
@@ -1241,12 +1315,14 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function syncCursorToViewport(): void {
-    const firstVisibleLine = clamp(viewer.scrollTop, 0, Math.max(0, state.documentLines.length - 1));
-    const lastVisibleLine = clamp(firstVisibleLine + visibleDocumentRows() - 1, 0, Math.max(0, state.documentLines.length - 1));
-    if (state.cursorLine < firstVisibleLine || state.cursorLine > lastVisibleLine) {
-      state.cursorLine = clamp(firstVisibleLine + state.cursorViewportRow, firstVisibleLine, lastVisibleLine);
-      state.cursorColumn = 0;
-    }
+    const synced = syncCursorToViewportState(
+      { cursorLine: state.cursorLine, cursorColumn: state.cursorColumn, cursorViewportRow: state.cursorViewportRow },
+      { documentLineCount: state.documentLines.length, scrollTop: viewer.scrollTop, visibleRows: visibleDocumentRows() },
+      lineLength,
+    );
+    state.cursorLine = synced.cursorLine;
+    state.cursorColumn = synced.cursorColumn;
+    state.cursorViewportRow = synced.cursorViewportRow;
   }
 
   function setVisualAnchor(): void {
