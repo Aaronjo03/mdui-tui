@@ -4,6 +4,8 @@ MDUI is a Bun-powered terminal Markdown renderer built with strict TypeScript an
 
 > OpenTUI currently targets Bun, so MDUI runs on Bun rather than Node.
 
+[![Star History Chart](https://api.star-history.com/svg?repos=Aaronjo03/mdui-tui&type=Date)](https://www.star-history.com/#Aaronjo03/mdui-tui&Date)
+
 ## Features
 
 - Interactive Markdown finder rooted at the current directory.
@@ -204,8 +206,6 @@ mdui CHANGELOG.md > changelog-ansi.txt  # ANSI-formatted, pipe-safe
 ```sh
 gh repo star Aaronjo03/mdui-tui
 ```
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Aaronjo03/mdui-tui&type=Date)](https://www.star-history.com/#Aaronjo03/mdui-tui&Date)
 
 </details>
 
