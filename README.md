@@ -205,6 +205,8 @@ mdui CHANGELOG.md > changelog-ansi.txt  # ANSI-formatted, pipe-safe
 gh repo star Aaronjo03/mdui-tui
 ```
 
+[![Star History Chart](https://api.star-history.com/svg?repos=Aaronjo03/mdui-tui&type=Date)](https://www.star-history.com/#Aaronjo03/mdui-tui&Date)
+
 </details>
 
 ## License
