@@ -88,7 +88,17 @@ describe("finder key decisions", () => {
 
     expect(decideFinderKey(state, { name: "?", ctrl: true, meta: false })).toEqual({ kind: "toggleHelp" });
     expect(decideFinderKey(state, { name: "/", ctrl: true, meta: false })).toEqual({ kind: "toggleHelp" });
+    expect(decideFinderKey(state, { name: "/", ctrl: true, meta: false, shift: true })).toEqual({ kind: "toggleHelp" });
     expect(decideFinderKey(state, { name: "", ctrl: true, meta: false, sequence: "\u001F" })).toEqual({ kind: "toggleHelp" });
+  });
+
+  it("supports zoom and line-wrap toggles", () => {
+    const state = { routeType: "document" as const, filterActive: false, query: "", sidebarVisible: false, vimMode: "normal" as const };
+
+    expect(decideFinderKey(state, { name: "+", ctrl: true, meta: false })).toEqual({ kind: "zoomIn" });
+    expect(decideFinderKey(state, { name: "=", ctrl: true, meta: false })).toEqual({ kind: "zoomIn" });
+    expect(decideFinderKey(state, { name: "-", ctrl: true, meta: false })).toEqual({ kind: "zoomOut" });
+    expect(decideFinderKey(state, key("w"))).toEqual({ kind: "toggleWrap" });
   });
 
   it("supports vim-style document scroll motions", () => {

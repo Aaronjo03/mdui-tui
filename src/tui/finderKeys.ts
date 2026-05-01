@@ -15,6 +15,7 @@ export interface FinderKeyInput {
   readonly name: string;
   readonly ctrl: boolean;
   readonly meta: boolean;
+  readonly shift?: boolean;
   readonly sequence?: string;
   readonly raw?: string;
 }
@@ -55,6 +56,9 @@ export type FinderKeyDecision =
   | { readonly kind: "toggleToc" }
   | { readonly kind: "navigateBack" }
   | { readonly kind: "navigateForward" }
+  | { readonly kind: "zoomIn" }
+  | { readonly kind: "zoomOut" }
+  | { readonly kind: "toggleWrap" }
   | { readonly kind: "startFilter" }
   | { readonly kind: "updateFilter"; readonly query: string }
   | { readonly kind: "clearFilter" }
@@ -120,6 +124,12 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
     if (key.name === "p" && key.ctrl && !key.meta) {
       return { kind: "exportPdf" };
     }
+    if (key.ctrl && !key.meta && (key.name === "+" || key.name === "=")) {
+      return { kind: "zoomIn" };
+    }
+    if (key.ctrl && !key.meta && key.name === "-") {
+      return { kind: "zoomOut" };
+    }
     if (key.name === "/" && !key.ctrl && !key.meta) {
       return sidebarVisible ? { kind: "startFilter" } : { kind: "startDocumentSearch" };
     }
@@ -149,6 +159,9 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
     }
     if (key.name === "t" && !key.ctrl && !key.meta) {
       return { kind: "toggleToc" };
+    }
+    if (key.name === "w" && !key.ctrl && !key.meta) {
+      return { kind: "toggleWrap" };
     }
     if (key.name === "y" && !key.ctrl && !key.meta && vimMode !== "normal") {
       return { kind: "yankAndExitVisual" };
@@ -227,5 +240,5 @@ function isCountDigit(key: FinderKeyInput, countPrefix: string): boolean {
 }
 
 function isHelpKey(key: FinderKeyInput): boolean {
-  return key.ctrl && (key.name === "?" || key.name === "/" || key.sequence === "\u001F" || key.raw === "\u001F");
+  return key.ctrl && (key.name === "?" || key.name === "/" || key.sequence === "\u001F" || key.raw === "\u001F" || (key.shift === true && key.name === "/"));
 }

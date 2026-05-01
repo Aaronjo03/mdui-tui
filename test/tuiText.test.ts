@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 import { cliHelpText, footerText, helpPanelText } from "../src/tui/text.js";
 
 describe("TUI text helpers", () => {
-  it("includes copy help by default", () => {
-    expect(footerText("")).toContain("y yank visual");
+  it("includes compact help by default", () => {
     expect(footerText("")).toContain("arrows/hjkl move");
-    expect(footerText("")).toContain("8j counts");
-    expect(footerText("")).toContain("o open link");
+    expect(footerText("")).toContain("Tab/Esc sidebar");
   });
 
   it("shows the read-only Vim mode", () => {
@@ -15,8 +13,8 @@ describe("TUI text helpers", () => {
     expect(footerText("", { vimMode: "visualBlock" })).toContain("V-BLOCK");
   });
 
-  it("shows sidebar toggle help based on visibility", () => {
-    expect(footerText("", { vimMode: "normal", sidebarVisible: true })).toContain("Tab hide sidebar");
+  it("shows sidebar toggle help regardless of visibility", () => {
+    expect(footerText("", { vimMode: "normal", sidebarVisible: true })).toContain("Tab/Esc sidebar");
     expect(footerText("", { vimMode: "normal", sidebarVisible: false })).toContain("Tab/Esc sidebar");
   });
 
@@ -31,10 +29,13 @@ describe("TUI text helpers", () => {
     expect(footerText("", { vimMode: "normal", countPrefix: "8" })).toContain("count 8");
   });
 
-  it("shows Slack copy and PDF export help", () => {
-    expect(footerText("")).toContain("Ctrl-y Slack");
-    expect(footerText("")).toContain("Ctrl-p PDF");
-    expect(footerText("")).toContain("Ctrl-/ help");
+  it("shows Slack copy and PDF export in help panel, not footer", () => {
+    const help = helpPanelText();
+    expect(help).toContain("Ctrl-y");
+    expect(help).toContain("Ctrl-p");
+    expect(help).toContain("Ctrl-/");
+    expect(footerText("")).not.toContain("Ctrl-y Slack");
+    expect(footerText("")).not.toContain("Ctrl-p PDF");
   });
 
   it("appends copy notifications", () => {
