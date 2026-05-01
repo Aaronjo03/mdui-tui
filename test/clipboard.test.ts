@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createOsc52Sequence, nativeClipboardCommands } from "../src/tui/clipboard.js";
+import { createOsc52Sequence, nativeClipboardCommands, nativeClipboardReadCommands } from "../src/tui/clipboard.js";
 
 describe("OSC52 clipboard sequences", () => {
   it("creates a clipboard OSC52 sequence", () => {
@@ -13,5 +13,10 @@ describe("OSC52 clipboard sequences", () => {
   it("uses native clipboard commands that accept stdin rather than argv text", () => {
     expect(nativeClipboardCommands("darwin")).toEqual([{ executable: "pbcopy", args: [] }]);
     expect(nativeClipboardCommands("linux").every((command) => !command.args.includes("hello"))).toBe(true);
+  });
+
+  it("uses native clipboard read commands for paste", () => {
+    expect(nativeClipboardReadCommands("darwin")).toEqual([{ executable: "pbpaste", args: [] }]);
+    expect(nativeClipboardReadCommands("linux").map((command) => command.executable)).toContain("wl-paste");
   });
 });

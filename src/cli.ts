@@ -21,12 +21,18 @@ async function main(args: readonly string[]): Promise<number> {
   }
 
   if (options.filePath !== undefined) {
+    if (isHttpUrl(options.filePath) && process.stdin.isTTY && process.stdout.isTTY) {
+      const config = await discoverMduiConfig(process.cwd());
+      const remote = await fetchRemoteMarkdown(options.filePath);
+      await runTui({ rootDirectory: process.cwd(), initialRemoteDocument: remote, ...config.config });
+      return 0;
+    }
     await renderFile(options.filePath);
     return 0;
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stderr.write("mdui: interactive finder requires a TTY. Pass a Markdown file to render directly.\n");
+    process.stderr.write("mdui: interactive finder requires a TTY. Pass a Markdown file or remote .md URL to render directly.\n");
     return 1;
   }
 

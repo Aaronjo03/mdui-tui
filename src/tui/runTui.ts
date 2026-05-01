@@ -20,21 +20,22 @@ import {
 import { exportMarkdownToPdf } from "../export/pdf.js";
 import { markdownToSlackMrkdwn } from "../export/slack.js";
 import { discoverMarkdownFiles, type MarkdownFile } from "../fs/markdownFiles.js";
-import { fetchRemoteMarkdown, resolveRemoteMarkdownUrl } from "../fs/remoteMarkdown.js";
+import { fetchRemoteMarkdown, resolveRemoteMarkdownUrl, type RemoteMarkdownDocument } from "../fs/remoteMarkdown.js";
 import { filterFiles, type RankedFile } from "../finder/filterFiles.js";
 import { firstRenderedDocumentLink, resolveInternalMarkdownFile } from "../markdown/links.js";
 import { renderMarkdownToAnsi } from "../render/markdownToAnsi.js";
-import { copyToClipboard } from "./clipboard.js";
+import { copyToClipboard, readFromNativeClipboard } from "./clipboard.js";
 import { syncCursorToViewportState } from "./cursorState.js";
 import { isStableFileSnapshot, shouldReloadFileByMtime } from "./fileReload.js";
 import { documentStats, formatDocumentStats, type DocumentStats } from "./documentStats.js";
 import { decideFinderKey, type VimMode } from "./finderKeys.js";
 import { closestSearchMatchIndex, findSearchMatches, wrapSearchMatchIndex, type SearchMatch } from "./search.js";
-import { footerText, helpPanelText, modeLabel } from "./text.js";
+import { footerText, headerText, helpPanelText } from "./text.js";
 import { extractToc, formatToc, type TocEntry } from "./toc.js";
 
 export interface TuiOptions extends MduiConfig {
   readonly rootDirectory: string;
+  readonly initialRemoteDocument?: RemoteMarkdownDocument;
 }
 
 type FinderRoute = { readonly type: "finder" };
@@ -51,6 +52,8 @@ interface TuiState {
   route: Route;
   filterActive: boolean;
   query: string;
+  urlInputActive: boolean;
+  urlInputQuery: string;
   ranked: readonly RankedFile[];
   documentText: string;
   markdownSource: string;
@@ -65,6 +68,7 @@ interface TuiState {
   tocVisible: boolean;
   cursorLine: number;
   cursorColumn: number;
+  cursorPreferredColumn: number;
   cursorViewportRow: number;
   visualAnchorLine: number;
   visualAnchorColumn: number;
@@ -132,6 +136,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
     route: { type: "finder" },
     filterActive: false,
     query: "",
+    urlInputActive: false,
+    urlInputQuery: "",
     ranked: filterFiles(files, ""),
     documentText: "",
     markdownSource: "",
@@ -146,6 +152,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     tocVisible: false,
     cursorLine: 0,
     cursorColumn: 0,
+    cursorPreferredColumn: 0,
     cursorViewportRow: 0,
     visualAnchorLine: 0,
     visualAnchorColumn: 0,
@@ -168,6 +175,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
   let currentFilePollTimer: ReturnType<typeof setInterval> | undefined;
   let currentFileLastReadMtimeMs: number | undefined;
   let documentLoadGeneration = 0;
+  let remoteOpenGeneration = 0;
   const remoteDocuments = new Map<string, RemoteDocumentMetadata>();
 
   renderer._internalKeyInput.onInternal("keypress", (key: KeyEvent) => {
@@ -230,7 +238,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     width: "100%",
     height: "100%",
     scrollY: true,
-    scrollX: true,
+    scrollX: false,
     viewportCulling: false,
   });
   helpPanel.add(helpPanelScroll);
@@ -283,7 +291,14 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
   const header = new TextRenderable(renderer, {
     id: "mdui-header",
-    content: headerText(state.query, state.ranked.length, files.length, state.filterActive, state.vimMode, state.sidebarVisible),
+    content: headerText(state.query, state.ranked.length, files.length, state.filterActive, state.vimMode, state.sidebarVisible, {
+      active: state.urlInputActive,
+      query: state.urlInputQuery,
+    }, {
+      active: state.documentSearchActive || state.searchMatches.length > 0,
+      query: state.documentSearchQuery,
+      ...(state.searchMatches.length > 0 ? { match: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` } : {}),
+    }),
     fg: "#7DD3FC",
   });
   root.add(header);
@@ -487,10 +502,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
       {
         routeType: state.route.type,
         filterActive: state.filterActive,
-        query: state.documentSearchActive ? state.documentSearchQuery : state.query,
+        query: activePromptQuery(),
         sidebarVisible: state.sidebarVisible,
         vimMode: state.vimMode,
         documentSearchActive: state.documentSearchActive,
+        urlInputActive: state.urlInputActive,
         goPrefixActive: state.goPrefixActive,
         countPrefix: state.countPrefix,
       },
@@ -504,6 +520,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
         rememberCurrentDocumentPosition();
         state.route = { type: "finder" };
         state.filterActive = false;
+        state.urlInputActive = false;
+        state.urlInputQuery = "";
         state.documentText = "";
         state.markdownSource = "";
         state.documentLines = [];
@@ -517,6 +535,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
         state.tocVisible = false;
         state.cursorLine = 0;
         state.cursorColumn = 0;
+        state.cursorPreferredColumn = 0;
         state.cursorViewportRow = 0;
         state.visualAnchorLine = 0;
         state.visualAnchorColumn = 0;
@@ -624,6 +643,67 @@ export async function runTui(options: TuiOptions): Promise<void> {
         key.preventDefault();
         key.stopPropagation();
         return;
+      case "startUrlInput":
+        state.urlInputActive = true;
+        state.urlInputQuery = "";
+        state.filterActive = false;
+        state.documentSearchActive = false;
+        state.documentSearchQuery = "";
+        state.searchConfirmed = false;
+        state.searchMatches = [];
+        state.searchMatchIndex = -1;
+        state.goPrefixActive = false;
+        state.countPrefix = "";
+        state.tocVisible = false;
+        renderer.clearSelection();
+        refreshChrome();
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      case "updateUrlInput":
+        state.urlInputQuery = decision.query;
+        refreshChrome();
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      case "pasteUrlInput": {
+        const pasted = urlInputClipboardText(readFromNativeClipboard());
+        if (pasted.length === 0) {
+          showNotice("Clipboard is empty");
+        } else {
+          state.urlInputQuery = `${state.urlInputQuery}${pasted}`;
+          refreshChrome();
+        }
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      }
+      case "clearUrlInput":
+        state.urlInputActive = false;
+        state.urlInputQuery = "";
+        refreshChrome();
+        updateDocumentCursor();
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      case "confirmUrlInput": {
+        const url = state.urlInputQuery.trim();
+        state.urlInputActive = false;
+        state.urlInputQuery = "";
+        refreshChrome();
+        if (url.length === 0) {
+          showNotice("URL prompt cancelled");
+          key.preventDefault();
+          key.stopPropagation();
+          return;
+        }
+        void openRemoteMarkdownFromInput(url).catch((error: unknown) => {
+          showNotice(error instanceof Error ? `Remote open failed: ${error.message}` : "Remote open failed");
+        });
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      }
       case "zoomIn":
         state.countPrefix = "";
         state.zoomLevel = clamp(state.zoomLevel + 1, -4, 6);
@@ -708,6 +788,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
         return;
       case "startDocumentSearch":
         state.countPrefix = "";
+        state.urlInputActive = false;
+        state.urlInputQuery = "";
         state.documentSearchActive = true;
         state.documentSearchQuery = "";
         state.searchConfirmed = false;
@@ -788,6 +870,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
       case "moveCursorLineStart":
         state.goPrefixActive = false;
         state.cursorColumn = 0;
+        state.cursorPreferredColumn = 0;
         updateDocumentCursor();
         updateVisualSelection();
         rememberCurrentDocumentPosition();
@@ -825,6 +908,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
         viewer.scrollTop = 0;
         state.cursorLine = 0;
         state.cursorColumn = 0;
+        state.cursorPreferredColumn = 0;
         state.cursorViewportRow = 0;
         refreshChrome();
         updateDocumentCursor();
@@ -836,6 +920,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
         viewer.scrollTop = viewer.scrollHeight;
         state.cursorLine = Math.max(0, state.documentLines.length - 1);
         state.cursorColumn = 0;
+        state.cursorPreferredColumn = 0;
         state.cursorViewportRow = clamp(state.cursorLine - viewer.scrollTop, 0, visibleDocumentRows() - 1);
         refreshChrome();
         updateDocumentCursor();
@@ -847,6 +932,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
         state.countPrefix = "";
         state.cursorLine = clamp(decision.line - 1, 0, Math.max(0, state.documentLines.length - 1));
         state.cursorColumn = 0;
+        state.cursorPreferredColumn = 0;
         ensureCursorVisible();
         refreshChrome();
         updateDocumentCursor();
@@ -864,6 +950,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
       case "startFilter":
         state.route = { type: "finder" };
         state.filterActive = true;
+        state.urlInputActive = false;
+        state.urlInputQuery = "";
         state.sidebarVisible = true;
         state.vimMode = "normal";
         state.countPrefix = "";
@@ -895,6 +983,15 @@ export async function runTui(options: TuiOptions): Promise<void> {
   renderer.on("destroy", () => {
     process.off("SIGHUP", handleHangup);
   });
+  if (options.initialRemoteDocument !== undefined) {
+    remoteDocuments.set(options.initialRemoteDocument.file.absolutePath, {
+      sourceUrl: options.initialRemoteDocument.sourceUrl,
+      tempDirectory: options.initialRemoteDocument.tempDirectory,
+    });
+    void openDocument(options.initialRemoteDocument.file, { pushHistory: false }).catch((error: unknown) => {
+      showNotice(error instanceof Error ? `Remote open failed: ${error.message}` : "Remote open failed");
+    });
+  }
 
   async function openSelected(): Promise<void> {
     const selected = selectedRankedFile(state.ranked, finder.getSelectedIndex());
@@ -954,9 +1051,20 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   async function loadDocument(file: MarkdownFile): Promise<boolean> {
+    if (exiting) {
+      return false;
+    }
     const loadGeneration = ++documentLoadGeneration;
-    const snapshot = await readStableDocument(file);
-    if (!isCurrentDocumentLoad(file, loadGeneration)) {
+    let snapshot: { readonly markdown: string; readonly mtimeMs: number };
+    try {
+      snapshot = await readStableDocument(file);
+    } catch (error) {
+      if (exiting) {
+        return false;
+      }
+      throw error;
+    }
+    if (exiting || !isCurrentDocumentLoad(file, loadGeneration)) {
       return false;
     }
     viewer.title = ` ${basename(file.relativePath)} `;
@@ -1000,7 +1108,14 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function refreshChrome(): void {
-    header.content = headerText(state.query, state.ranked.length, files.length, state.filterActive, state.vimMode, state.sidebarVisible);
+    header.content = headerText(state.query, state.ranked.length, files.length, state.filterActive, state.vimMode, state.sidebarVisible, {
+      active: state.urlInputActive,
+      query: state.urlInputQuery,
+    }, {
+      active: state.documentSearchActive || state.searchMatches.length > 0,
+      query: state.documentSearchQuery,
+      ...(state.searchMatches.length > 0 ? { match: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` } : {}),
+    });
     footer.content = footerText(state.notice, footerState());
     lineNumbers.visible = state.route.type === "document";
     lineNumbers.content = state.route.type === "document" ? lineNumberText(state.documentLines.length) : "";
@@ -1020,6 +1135,13 @@ export async function runTui(options: TuiOptions): Promise<void> {
   function resetCountPrefix(): void {
     state.countPrefix = "";
     refreshChrome();
+  }
+
+  function activePromptQuery(): string {
+    if (state.urlInputActive) {
+      return state.urlInputQuery;
+    }
+    return state.documentSearchActive ? state.documentSearchQuery : state.query;
   }
 
   function lineNumberText(lineCount: number): string {
@@ -1210,12 +1332,14 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (savedPosition === undefined) {
       state.cursorLine = 0;
       state.cursorColumn = 0;
+      state.cursorPreferredColumn = 0;
       state.cursorViewportRow = 0;
       viewer.scrollTop = 0;
       return;
     }
     state.cursorLine = clamp(savedPosition.cursorLine, 0, Math.max(0, state.documentLines.length - 1));
     state.cursorColumn = clamp(savedPosition.cursorColumn, 0, lineLength(state.cursorLine));
+    state.cursorPreferredColumn = savedPosition.cursorColumn;
     viewer.scrollTop = clamp(savedPosition.scrollTop, 0, Math.max(0, state.documentLines.length - 1));
     state.cursorViewportRow = clamp(state.cursorLine - viewer.scrollTop, 0, visibleDocumentRows() - 1);
   }
@@ -1263,9 +1387,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
     }
     syncCursorToViewport();
     const nextLine = clamp(state.cursorLine + lineDelta, 0, state.documentLines.length - 1);
-    const nextColumn = lineDelta === 0 ? clamp(state.cursorColumn + columnDelta, 0, lineLength(nextLine)) : 0;
+    const preferredColumn = lineDelta === 0 ? state.cursorColumn + columnDelta : state.cursorPreferredColumn;
+    const nextColumn = clamp(preferredColumn, 0, lineLength(nextLine));
     state.cursorLine = nextLine;
     state.cursorColumn = nextColumn;
+    state.cursorPreferredColumn = lineDelta === 0 ? nextColumn : preferredColumn;
     ensureCursorVisible();
     refreshChrome();
     updateDocumentCursor();
@@ -1297,6 +1423,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     }
     state.cursorLine = match.line;
     state.cursorColumn = match.column;
+    state.cursorPreferredColumn = match.column;
     ensureCursorVisible();
     updateSearchSelection();
     rememberCurrentDocumentPosition();
@@ -1325,6 +1452,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     }
     state.cursorLine = match.line;
     state.cursorColumn = match.column;
+    state.cursorPreferredColumn = match.column;
     ensureCursorVisible();
     updateSearchSelection();
     rememberCurrentDocumentPosition();
@@ -1356,7 +1484,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
       }
     }
     state.cursorViewportRow = row;
-    const x = viewerMarkdown.screenX + state.cursorColumn;
+    const x = clampedCursorScreenX(state.cursorColumn);
     const y = viewerMarkdown.screenY + row;
     renderer.setCursorStyle({ style: state.vimMode === "normal" ? "block" : "underline", blinking: true });
     renderer.setCursorPosition(x, y, true);
@@ -1369,7 +1497,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
       lineLength,
     );
     state.cursorLine = synced.cursorLine;
-    state.cursorColumn = synced.cursorColumn;
+    state.cursorColumn = clamp(state.cursorPreferredColumn, 0, lineLength(synced.cursorLine));
     state.cursorViewportRow = synced.cursorViewportRow;
   }
 
@@ -1409,7 +1537,12 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (row < 0 || row >= visibleDocumentRows()) {
       return undefined;
     }
-    return { x: viewerMarkdown.screenX + column, y: viewerMarkdown.screenY + row };
+    return { x: clampedCursorScreenX(column), y: viewerMarkdown.screenY + row };
+  }
+
+  function clampedCursorScreenX(column: number): number {
+    const maxX = Math.max(viewerMarkdown.screenX, viewer.screenX + viewer.width - 2);
+    return clamp(viewerMarkdown.screenX + column, viewerMarkdown.screenX, maxX);
   }
 
   function visibleDocumentRows(): number {
@@ -1488,10 +1621,26 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   async function openRemoteMarkdownLink(url: string): Promise<void> {
+    await openFetchedRemoteMarkdown(url, { pushHistory: true });
+  }
+
+  async function openRemoteMarkdownFromInput(url: string): Promise<void> {
+    await openFetchedRemoteMarkdown(url, { pushHistory: state.route.type === "document" });
+  }
+
+  async function openFetchedRemoteMarkdown(url: string, options: { readonly pushHistory: boolean }): Promise<void> {
+    const openGeneration = ++remoteOpenGeneration;
     showNotice(`Fetching ${url}…`);
     const remote = await fetchRemoteMarkdown(url);
+    if (exiting || openGeneration !== remoteOpenGeneration) {
+      await rm(remote.tempDirectory, { recursive: true, force: true });
+      return;
+    }
     remoteDocuments.set(remote.file.absolutePath, { sourceUrl: remote.sourceUrl, tempDirectory: remote.tempDirectory });
-    await openDocument(remote.file, { pushHistory: true });
+    await openDocument(remote.file, { pushHistory: options.pushHistory });
+    if (exiting || openGeneration !== remoteOpenGeneration) {
+      return;
+    }
     showNotice(`Opened ${remote.file.name} from ${new URL(remote.sourceUrl).hostname}`);
   }
 
@@ -1505,12 +1654,15 @@ export async function runTui(options: TuiOptions): Promise<void> {
     }
     const previousLine = state.cursorLine;
     const previousColumn = state.cursorColumn;
+    const previousPreferredColumn = state.cursorPreferredColumn;
     state.cursorLine = line;
     state.cursorColumn = Math.max(0, x - viewerMarkdown.screenX);
+    state.cursorPreferredColumn = state.cursorColumn;
     const link = firstRenderedDocumentLink(state.documentLines[line] ?? "");
     if (link === undefined) {
       state.cursorLine = previousLine;
       state.cursorColumn = previousColumn;
+      state.cursorPreferredColumn = previousPreferredColumn;
       return false;
     }
     openCurrentLineLink();
@@ -1579,7 +1731,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
       state.searchMatchIndex = state.searchMatches.length === 0 ? -1 : clamp(state.searchMatchIndex, 0, state.searchMatches.length - 1);
     }
     state.cursorLine = clamp(state.cursorLine, 0, Math.max(0, state.documentLines.length - 1));
-    state.cursorColumn = clamp(state.cursorColumn, 0, lineLength(state.cursorLine));
+    state.cursorColumn = clamp(state.cursorPreferredColumn, 0, lineLength(state.cursorLine));
   }
 
   function currentDocumentRenderWidth(): number {
@@ -1599,6 +1751,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (state.documentLines.length === 0) {
       state.cursorLine = 0;
       state.cursorColumn = 0;
+      state.cursorPreferredColumn = 0;
       state.cursorViewportRow = 0;
       return;
     }
@@ -1607,6 +1760,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (state.cursorLine < firstVisible || state.cursorLine > lastVisible) {
       state.cursorLine = firstVisible;
       state.cursorColumn = 0;
+      state.cursorPreferredColumn = 0;
       state.cursorViewportRow = 0;
     }
   }
@@ -1624,6 +1778,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function showNotice(message: string): void {
+    if (exiting) {
+      return;
+    }
     noticeVersion += 1;
     const currentNoticeVersion = noticeVersion;
     if (noticeTimer !== undefined) {
@@ -1644,6 +1801,23 @@ export async function runTui(options: TuiOptions): Promise<void> {
       }
     }, 2500);
   }
+}
+
+function urlInputClipboardText(text: string | undefined): string {
+  if (text === undefined) {
+    return "";
+  }
+  let clean = "";
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && codePoint >= 32 && codePoint !== 127 && codePoint < 128) {
+      clean += character;
+    }
+    if (codePoint !== undefined && codePoint > 159) {
+      clean += character;
+    }
+  }
+  return clean.trim();
 }
 
 function isCopyKey(key: KeyEvent): boolean {
@@ -1732,12 +1906,6 @@ function rankedToOptions(ranked: readonly RankedFile[]): SelectOption[] {
 
 function selectedRankedFile(ranked: readonly RankedFile[], index: number): RankedFile | undefined {
   return index >= 0 ? ranked[index] : undefined;
-}
-
-function headerText(query: string, shown: number, total: number, filterActive: boolean, vimMode: VimMode, sidebarVisible: boolean): string {
-  const filter = filterActive ? ` filter: ${query}_` : " / to filter";
-  const sidebar = sidebarVisible ? "[Tab hide sidebar]" : "[Tab/Esc sidebar]";
-  return `MDUI ${modeLabel(vimMode)} • ${sidebar} • ${filter} • ${shown}/${total} Markdown files`;
 }
 
 function formatSize(bytes: number): string {

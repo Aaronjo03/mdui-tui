@@ -5,6 +5,7 @@ export interface FinderKeyState {
   readonly sidebarVisible?: boolean;
   readonly vimMode?: VimMode;
   readonly documentSearchActive?: boolean;
+  readonly urlInputActive?: boolean;
   readonly goPrefixActive?: boolean;
   readonly countPrefix?: string;
 }
@@ -34,6 +35,11 @@ export type FinderKeyDecision =
   | { readonly kind: "exportPdf" }
   | { readonly kind: "openLink" }
   | { readonly kind: "startDocumentSearch" }
+  | { readonly kind: "startUrlInput" }
+  | { readonly kind: "updateUrlInput"; readonly query: string }
+  | { readonly kind: "pasteUrlInput" }
+  | { readonly kind: "confirmUrlInput" }
+  | { readonly kind: "clearUrlInput" }
   | { readonly kind: "updateDocumentSearch"; readonly query: string }
   | { readonly kind: "confirmDocumentSearch" }
   | { readonly kind: "clearDocumentSearch" }
@@ -69,6 +75,7 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
   const vimMode = state.vimMode ?? "normal";
   const sidebarVisible = state.sidebarVisible ?? true;
   const documentSearchActive = state.documentSearchActive ?? false;
+  const urlInputActive = state.urlInputActive ?? false;
   const goPrefixActive = state.goPrefixActive ?? false;
   const countPrefix = state.countPrefix ?? "";
 
@@ -80,7 +87,14 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
     return { kind: "exit" };
   }
 
+  if (!urlInputActive && key.name === "u" && key.ctrl && !key.meta) {
+    return { kind: "startUrlInput" };
+  }
+
   if (key.name === "escape") {
+    if (urlInputActive) {
+      return { kind: "clearUrlInput" };
+    }
     if (state.routeType === "document") {
       if (documentSearchActive) {
         return { kind: "clearDocumentSearch" };
@@ -100,6 +114,9 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
   }
 
   if (state.routeType === "document") {
+    if (urlInputActive) {
+      return decideUrlInputKey(state.query, key);
+    }
     if (documentSearchActive) {
       if (key.name === "backspace" || key.name === "delete") {
         return { kind: "updateDocumentSearch", query: state.query.slice(0, -1) };
@@ -175,9 +192,6 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
     if (key.ctrl && key.name === "d") {
       return { kind: "scrollHalfPageDown" };
     }
-    if (key.ctrl && key.name === "u") {
-      return { kind: "scrollHalfPageUp" };
-    }
     if (key.ctrl && key.name === "f") {
       return { kind: "scrollPageDown" };
     }
@@ -207,6 +221,10 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
     }
   }
 
+  if (urlInputActive) {
+    return decideUrlInputKey(state.query, key);
+  }
+
   if (state.filterActive) {
     if (key.name === "backspace" || key.name === "delete") {
       return { kind: "updateFilter", query: state.query.slice(0, -1) };
@@ -230,6 +248,45 @@ export function decideFinderKey(state: FinderKeyState, key: FinderKeyInput): Fin
 
 function isPlainCharacter(key: FinderKeyInput, character: string): boolean {
   return !key.ctrl && !key.meta && (key.name === character || key.sequence === character || key.raw === character);
+}
+
+function decideUrlInputKey(query: string, key: FinderKeyInput): FinderKeyDecision {
+  if (key.name === "backspace" || key.name === "delete") {
+    return { kind: "updateUrlInput", query: query.slice(0, -1) };
+  }
+  if (key.name === "enter" || key.name === "return") {
+    return { kind: "confirmUrlInput" };
+  }
+  if (isUrlPasteKey(key)) {
+    return { kind: "pasteUrlInput" };
+  }
+  const text = printableInputText(key);
+  return text.length > 0 ? { kind: "updateUrlInput", query: `${query}${text}` } : { kind: "passThrough" };
+}
+
+function isUrlPasteKey(key: FinderKeyInput): boolean {
+  if (key.meta && !key.ctrl && key.name.toLowerCase() === "v") {
+    return true;
+  }
+  return key.ctrl && !key.meta && key.name.toLowerCase() === "v" && (key.shift === true || key.name === "V");
+}
+
+function printableInputText(key: FinderKeyInput): string {
+  if (key.ctrl || key.meta) {
+    return "";
+  }
+  const text = key.sequence ?? key.name;
+  return text.length > 0 && !containsControlCharacter(text) ? text : "";
+}
+
+function containsControlCharacter(text: string): boolean {
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && (codePoint < 32 || (codePoint >= 127 && codePoint <= 159))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isCountDigit(key: FinderKeyInput, countPrefix: string): boolean {

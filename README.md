@@ -94,7 +94,7 @@ After `bun run build`, the compiled binary entry is `dist/cli.js`. Chrome/Chromi
 | arrows or `h`/`j`/`k`/`l` | Move the read-only cursor |
 | `8j`, `4k`, `5l` | Prefix motions with a Vim-style count |
 | `0` | Move to the start of the current line |
-| `Ctrl-d` / `Ctrl-u` | Scroll half a page |
+| `Ctrl-d` | Scroll half a page down |
 | `Ctrl-f` / `Ctrl-b` | Scroll a page |
 | `gg` / `G` / `42G` | Jump to top / bottom / line 42 |
 | `Tab` | Toggle the file sidebar |
@@ -112,6 +112,7 @@ After `bun run build`, the compiled binary entry is `dist/cli.js`. Chrome/Chromi
 | `Ctrl-o` / `Ctrl-i` | Navigate back / forward through internal Markdown links |
 | `Ctrl-y` | Copy the current document as Slack mrkdwn |
 | `Ctrl-p` | Export the current document to `~/Downloads/<filename>.pdf` |
+| `Ctrl-u` | Paste/type a remote Markdown URL to open inside MDUI |
 | `Ctrl-/`, `Ctrl-?`, or `Ctrl-Shift-?` | Toggle the in-app help panel |
 | `Ctrl-+` / `Ctrl--` | Increase or decrease document wrapping width |
 | `w` | Toggle line wrapping on or off |
