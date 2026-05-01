@@ -15,20 +15,22 @@ export interface FooterState {
   readonly zoomLevel?: number;
 }
 
+export interface UrlInputState {
+  readonly active: boolean;
+  readonly query: string;
+}
+
+export interface DocumentSearchInputState {
+  readonly active: boolean;
+  readonly query: string;
+  readonly match?: string;
+}
+
 export function footerText(notice: string, state: FooterState = {}): string {
   const vimMode = state.vimMode ?? "normal";
   const cursor = state.cursorLine !== undefined && state.cursorColumn !== undefined ? ` • ${state.cursorLine}:${state.cursorColumn}` : "";
-  const selection =
-    state.selectionAnchorLine !== undefined && state.selectionAnchorColumn !== undefined && state.cursorLine !== undefined && state.cursorColumn !== undefined
-      ? ` • ${state.selectionAnchorLine}:${state.selectionAnchorColumn}→${state.cursorLine}:${state.cursorColumn}`
-      : "";
-  const matchInfo = state.searchMatch !== undefined ? ` [${state.searchMatch}]` : "";
-  const search = state.searchQuery !== undefined ? ` • /${state.searchQuery}_${matchInfo}` : matchInfo.length > 0 ? ` • search${matchInfo}` : "";
-  const count = state.countPrefix !== undefined && state.countPrefix.length > 0 ? ` • count ${state.countPrefix}` : "";
   const stats = state.documentStats !== undefined ? ` • ${state.documentStats}` : "";
-  const wrap = state.wrapEnabled === false ? " • wrap off" : "";
-  const zoom = state.zoomLevel !== undefined && state.zoomLevel !== 0 ? ` • zoom ${state.zoomLevel > 0 ? "+" : ""}${state.zoomLevel}` : "";
-  const base = `${modeLabel(vimMode)}${cursor}${selection}${search}${count}${stats}${wrap}${zoom} • arrows/hjkl move • Tab/Esc sidebar`;
+  const base = `${modeLabel(vimMode)}${cursor}${stats} • arrows/hjkl move • Tab/Esc sidebar • Ctrl-Shift-? help`;
   return notice.length > 0 ? `${base} • ${notice}` : base;
 }
 
@@ -41,6 +43,28 @@ export function modeLabel(vimMode: VimMode): string {
     case "visualBlock":
       return "V-BLOCK";
   }
+}
+
+export function headerText(
+  query: string,
+  shown: number,
+  total: number,
+  filterActive: boolean,
+  vimMode: VimMode,
+  sidebarVisible: boolean,
+  urlInput: UrlInputState = { active: false, query: "" },
+  documentSearch: DocumentSearchInputState = { active: false, query: "" },
+): string {
+  if (urlInput.active) {
+    return `MDUI ${modeLabel(vimMode)} • URL: ${urlInput.query}_ • Enter opens remote Markdown • Esc cancels`;
+  }
+  if (documentSearch.active) {
+    const match = documentSearch.match !== undefined ? ` [${documentSearch.match}]` : "";
+    return `MDUI ${modeLabel(vimMode)} • search: /${documentSearch.query}_${match} • Enter confirms • Esc cancels`;
+  }
+  const filter = filterActive ? `filter: ${query}_` : "/ to filter";
+  const sidebar = sidebarVisible ? "[Tab hide sidebar]" : "[Tab/Esc sidebar]";
+  return `MDUI ${modeLabel(vimMode)} • ${sidebar} • ${filter} • Ctrl-u URL • ${shown}/${total} Markdown files`;
 }
 
 export function cliHelpText(): string {
@@ -62,7 +86,7 @@ Finder keys:
 Document keys:
   arrows or hjkl   Move the read-only cursor
   8j / 4k / 5l     Prefix motions with a count
-  Ctrl-d / Ctrl-u  Scroll half a page
+  Ctrl-d           Scroll half a page down
   Ctrl-f / Ctrl-b  Scroll a page
   gg / G / 42G     Jump to top / bottom / line
   Tab              Toggle file sidebar
@@ -79,6 +103,7 @@ Document keys:
   o or Enter       Open the first link on the current line
   Ctrl-y           Copy current document as Slack mrkdwn
   Ctrl-p           Export current document to ~/Downloads/<filename>.pdf
+  Ctrl-u           Paste/type a remote Markdown URL to open in the TUI
   Ctrl-/ or Ctrl-? Toggle in-app help
   Ctrl-Shift-?     Toggle in-app help in terminals that report Shift
   Ctrl-+ / Ctrl--  Zoom content wrapping in / out
@@ -103,7 +128,7 @@ Finder
 Document
   arrows or hjkl   Move the read-only cursor
   8j / 4k / 5l     Prefix motions with a count
-  Ctrl-d / Ctrl-u  Scroll half a page
+  Ctrl-d           Scroll half a page down
   Ctrl-f / Ctrl-b  Scroll a page
   gg / G / 42G     Jump to top / bottom / line
   Tab              Toggle file sidebar
@@ -120,6 +145,7 @@ Document
   o or Enter       Open the first link on the current line
   Ctrl-y           Copy Slack mrkdwn
   Ctrl-p           Export PDF to ~/Downloads
+  Ctrl-u           Paste/type a remote Markdown URL to open in the TUI
   Ctrl-/ or Ctrl-? Toggle this panel
   Ctrl-Shift-?     Toggle this panel in terminals that report Shift
   Ctrl-+ / Ctrl--  Zoom content wrapping in / out
