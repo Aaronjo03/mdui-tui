@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { discoverMduiConfig } from "./config/config.js";
 import { isMarkdownPath } from "./fs/markdownFiles.js";
+import { fetchRemoteMarkdown, isRemoteMarkdownUrl } from "./fs/remoteMarkdown.js";
 import { renderMarkdownToAnsi } from "./render/markdownToAnsi.js";
 import { runTui } from "./tui/runTui.js";
 import { cliHelpText } from "./tui/text.js";
@@ -44,6 +45,11 @@ function parseArgs(args: readonly string[]): CliOptions {
 }
 
 async function renderFile(filePath: string): Promise<void> {
+  if (isHttpUrl(filePath)) {
+    await renderRemoteFile(filePath);
+    return;
+  }
+
   const absolutePath = resolve(filePath);
   const source = await readFile(absolutePath, "utf8");
   if (!isMarkdownPath(filePath)) {
@@ -51,6 +57,28 @@ async function renderFile(filePath: string): Promise<void> {
   }
   const width = process.stdout.columns > 0 ? process.stdout.columns : 88;
   process.stdout.write(renderMarkdownToAnsi(source, { width, color: process.stdout.isTTY && process.env.NO_COLOR === undefined }));
+}
+
+async function renderRemoteFile(url: string): Promise<void> {
+  if (!isRemoteMarkdownUrl(url)) {
+    throw new Error("remote URLs must point to a Markdown file");
+  }
+  const remote = await fetchRemoteMarkdown(url);
+  try {
+    const width = process.stdout.columns > 0 ? process.stdout.columns : 88;
+    process.stdout.write(renderMarkdownToAnsi(remote.markdown, { width, color: process.stdout.isTTY && process.env.NO_COLOR === undefined }));
+  } finally {
+    await rm(remote.tempDirectory, { recursive: true, force: true });
+  }
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 main(process.argv.slice(2))
