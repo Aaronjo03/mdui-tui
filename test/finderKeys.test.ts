@@ -105,7 +105,6 @@ describe("finder key decisions", () => {
     const state = { routeType: "document" as const, filterActive: false, query: "", sidebarVisible: false, vimMode: "normal" as const };
 
     expect(decideFinderKey(state, { name: "d", ctrl: true, meta: false })).toEqual({ kind: "scrollHalfPageDown" });
-    expect(decideFinderKey(state, { name: "u", ctrl: true, meta: false })).toEqual({ kind: "scrollHalfPageUp" });
     expect(decideFinderKey(state, { name: "f", ctrl: true, meta: false })).toEqual({ kind: "scrollPageDown" });
     expect(decideFinderKey(state, { name: "b", ctrl: true, meta: false })).toEqual({ kind: "scrollPageUp" });
     expect(decideFinderKey(state, key("g"))).toEqual({ kind: "startGoPrefix" });
@@ -167,6 +166,40 @@ describe("finder key decisions", () => {
     expect(decideFinderKey(state, key("b"))).toEqual({ kind: "updateDocumentSearch", query: "tab" });
     expect(decideFinderKey(state, key("backspace"))).toEqual({ kind: "updateDocumentSearch", query: "t" });
     expect(decideFinderKey(state, key("escape"))).toEqual({ kind: "clearDocumentSearch" });
+  });
+
+  it("starts URL input from finder and document modes", () => {
+    expect(decideFinderKey({ routeType: "finder", filterActive: false, query: "" }, { name: "u", ctrl: true, meta: false })).toEqual({ kind: "startUrlInput" });
+    expect(decideFinderKey({ routeType: "finder", filterActive: true, query: "pri" }, { name: "u", ctrl: true, meta: false })).toEqual({ kind: "startUrlInput" });
+    expect(
+      decideFinderKey({ routeType: "document", filterActive: false, query: "", sidebarVisible: true, vimMode: "normal" }, { name: "u", ctrl: true, meta: false }),
+    ).toEqual({ kind: "startUrlInput" });
+    expect(
+      decideFinderKey({ routeType: "document", filterActive: false, query: "", sidebarVisible: false, vimMode: "normal" }, { name: "u", ctrl: true, meta: false }),
+    ).toEqual({ kind: "startUrlInput" });
+    expect(
+      decideFinderKey({ routeType: "document", filterActive: false, query: "pri", sidebarVisible: false, vimMode: "normal", documentSearchActive: true }, { name: "u", ctrl: true, meta: false }),
+    ).toEqual({ kind: "startUrlInput" });
+  });
+
+  it("updates, confirms, and clears URL input", () => {
+    const state = { routeType: "finder" as const, filterActive: false, query: "https://example.com/", urlInputActive: true };
+
+    expect(decideFinderKey(state, { name: "pricing.md", ctrl: false, meta: false, sequence: "pricing.md" })).toEqual({
+      kind: "updateUrlInput",
+      query: "https://example.com/pricing.md",
+    });
+    expect(decideFinderKey(state, { name: "bad", ctrl: false, meta: false, sequence: "bad\u009B" })).toEqual({ kind: "passThrough" });
+    expect(decideFinderKey({ ...state, query: "abc" }, key("backspace"))).toEqual({ kind: "updateUrlInput", query: "ab" });
+    expect(decideFinderKey(state, { name: "v", ctrl: false, meta: true })).toEqual({ kind: "pasteUrlInput" });
+    expect(decideFinderKey(state, { name: "v", ctrl: true, meta: false, shift: true })).toEqual({ kind: "pasteUrlInput" });
+    expect(decideFinderKey(state, { name: "V", ctrl: true, meta: false })).toEqual({ kind: "pasteUrlInput" });
+    expect(decideFinderKey(state, { name: "v", ctrl: true, meta: false })).toEqual({ kind: "passThrough" });
+    expect(decideFinderKey({ ...state, routeType: "document", sidebarVisible: false, vimMode: "normal" }, { name: "v", ctrl: true, meta: false, shift: true })).toEqual({
+      kind: "pasteUrlInput",
+    });
+    expect(decideFinderKey(state, key("enter"))).toEqual({ kind: "confirmUrlInput" });
+    expect(decideFinderKey(state, key("escape"))).toEqual({ kind: "clearUrlInput" });
   });
 
   it("confirms document search on Enter", () => {
