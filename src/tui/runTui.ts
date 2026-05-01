@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import { basename, dirname } from "node:path";
 import { spawn } from "node:child_process";
@@ -20,8 +20,9 @@ import {
 import { exportMarkdownToPdf } from "../export/pdf.js";
 import { markdownToSlackMrkdwn } from "../export/slack.js";
 import { discoverMarkdownFiles, type MarkdownFile } from "../fs/markdownFiles.js";
+import { fetchRemoteMarkdown, resolveRemoteMarkdownUrl } from "../fs/remoteMarkdown.js";
 import { filterFiles, type RankedFile } from "../finder/filterFiles.js";
-import { firstDocumentLink, resolveInternalMarkdownFile } from "../markdown/links.js";
+import { firstRenderedDocumentLink, resolveInternalMarkdownFile } from "../markdown/links.js";
 import { renderMarkdownToAnsi } from "../render/markdownToAnsi.js";
 import { copyToClipboard } from "./clipboard.js";
 import { syncCursorToViewportState } from "./cursorState.js";
@@ -73,6 +74,13 @@ interface TuiState {
   notice: string;
   sidebarVisible: boolean;
   vimMode: VimMode;
+  wrapEnabled: boolean;
+  zoomLevel: number;
+}
+
+interface RemoteDocumentMetadata {
+  readonly sourceUrl: string;
+  readonly tempDirectory: string;
 }
 
 export async function runTui(options: TuiOptions): Promise<void> {
@@ -111,6 +119,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
       clearInterval(currentFilePollTimer);
     }
     closeCurrentFileWatcher();
+    void cleanupRemoteDocuments();
     renderer.setTerminalTitle("");
     renderer.destroy();
   };
@@ -146,6 +155,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
     notice: "",
     sidebarVisible: true,
     vimMode: "normal",
+    wrapEnabled: true,
+    zoomLevel: 0,
   };
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   let noticeVersion = 0;
@@ -157,6 +168,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
   let currentFilePollTimer: ReturnType<typeof setInterval> | undefined;
   let currentFileLastReadMtimeMs: number | undefined;
   let documentLoadGeneration = 0;
+  const remoteDocuments = new Map<string, RemoteDocumentMetadata>();
 
   renderer._internalKeyInput.onInternal("keypress", (key: KeyEvent) => {
     if (state.route.type === "document" && !state.helpVisible && !state.documentSearchActive && isCopyKey(key)) {
@@ -218,7 +230,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     width: "100%",
     height: "100%",
     scrollY: true,
-    scrollX: false,
+    scrollX: true,
     viewportCulling: false,
   });
   helpPanel.add(helpPanelScroll);
@@ -358,17 +370,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     conceal: true,
     fg: "#CBD5E1",
     width: "100%",
-    tableOptions: {
-      style: "grid",
-      widthMode: "full",
-      wrapMode: "word",
-      cellPadding: 1,
-      borders: true,
-      outerBorder: true,
-      borderStyle: "single",
-      borderColor: "#8B8FA3",
-      selectable: true,
-    },
+    tableOptions: markdownTableOptions(state.wrapEnabled),
   });
   viewerMarkdown.selectable = true;
 
@@ -622,6 +624,32 @@ export async function runTui(options: TuiOptions): Promise<void> {
         key.preventDefault();
         key.stopPropagation();
         return;
+      case "zoomIn":
+        state.countPrefix = "";
+        state.zoomLevel = clamp(state.zoomLevel + 1, -4, 6);
+        applyDocumentLayout();
+        refreshDocumentRender();
+        clampScrollTop();
+        clampCursorToViewportStartIfNeeded();
+        refreshChrome();
+        updateDocumentCursor();
+        showNotice(`Zoom ${state.zoomLevel > 0 ? "+" : ""}${state.zoomLevel}`);
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      case "zoomOut":
+        state.countPrefix = "";
+        state.zoomLevel = clamp(state.zoomLevel - 1, -4, 6);
+        applyDocumentLayout();
+        refreshDocumentRender();
+        clampScrollTop();
+        clampCursorToViewportStartIfNeeded();
+        refreshChrome();
+        updateDocumentCursor();
+        showNotice(`Zoom ${state.zoomLevel > 0 ? "+" : ""}${state.zoomLevel}`);
+        key.preventDefault();
+        key.stopPropagation();
+        return;
       case "openLink":
         openCurrentLineLink();
         resetCountPrefix();
@@ -645,6 +673,19 @@ export async function runTui(options: TuiOptions): Promise<void> {
         tocPanelScroll.scrollTop = 0;
         resetCountPrefix();
         refreshChrome();
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      case "toggleWrap":
+        state.wrapEnabled = !state.wrapEnabled;
+        state.countPrefix = "";
+        applyDocumentLayout();
+        refreshDocumentRender();
+        clampScrollTop();
+        clampCursorToViewportStartIfNeeded();
+        refreshChrome();
+        updateDocumentCursor();
+        showNotice(state.wrapEnabled ? "Line wrapping on" : "Line wrapping off");
         key.preventDefault();
         key.stopPropagation();
         return;
@@ -918,19 +959,17 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (!isCurrentDocumentLoad(file, loadGeneration)) {
       return false;
     }
-    const width = Math.max(40, renderer.terminalWidth - 8);
-    const rendered = renderMarkdownToAnsi(snapshot.markdown, { width, color: false });
     viewer.title = ` ${basename(file.relativePath)} `;
     renderer.setTerminalTitle(`MDUI - ${file.relativePath}`);
-    state.documentText = rendered;
     state.markdownSource = snapshot.markdown;
-    state.documentLines = rendered.split("\n");
+    refreshDocumentRender();
     state.documentStats = documentStats(snapshot.markdown);
     state.tocEntries = extractToc(snapshot.markdown);
     state.searchMatches = state.searchConfirmed ? findAllSearchMatches(state.documentSearchQuery) : [];
     currentFileLastReadMtimeMs = snapshot.mtimeMs;
     restoreDocumentPosition(file.absolutePath);
     viewerMarkdown.content = snapshot.markdown;
+    applyDocumentLayout();
     return true;
   }
 
@@ -1103,6 +1142,10 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
   function watchCurrentFile(file: MarkdownFile): void {
     closeCurrentFileWatcher();
+    if (remoteDocuments.has(file.absolutePath)) {
+      currentFileLastReadMtimeMs = undefined;
+      return;
+    }
     currentFilePollTimer = setInterval(() => {
       void reloadCurrentDocument(file).catch((error: unknown) => {
         showNotice(error instanceof Error ? `Reload failed: ${error.message}` : "Reload failed");
@@ -1188,13 +1231,14 @@ export async function runTui(options: TuiOptions): Promise<void> {
     readonly searchMatch?: string;
     readonly countPrefix?: string;
     readonly documentStats?: string;
+    readonly wrapEnabled?: boolean;
+    readonly zoomLevel?: number;
   } {
-    const footer = {
+    return {
       vimMode: state.vimMode,
       sidebarVisible: state.sidebarVisible,
-    };
-    return {
-      ...footer,
+      wrapEnabled: state.wrapEnabled,
+      zoomLevel: state.zoomLevel,
       ...(state.route.type === "document" ? { cursorLine: state.cursorLine, cursorColumn: state.cursorColumn } : {}),
       ...(state.vimMode !== "normal" ? { selectionAnchorLine: state.visualAnchorLine, selectionAnchorColumn: state.visualAnchorColumn } : {}),
       ...(state.documentSearchActive ? { searchQuery: state.documentSearchQuery } : {}),
@@ -1301,11 +1345,15 @@ export async function runTui(options: TuiOptions): Promise<void> {
       renderer.setCursorPosition(0, 0, false);
       return;
     }
-    const row = state.cursorLine - viewer.scrollTop;
+    let row = state.cursorLine - viewer.scrollTop;
     const visibleRows = visibleDocumentRows();
     if (row < 0 || row >= visibleRows) {
-      renderer.setCursorPosition(0, 0, false);
-      return;
+      clampCursorToViewportStartIfNeeded();
+      row = state.cursorLine - viewer.scrollTop;
+      if (row < 0 || row >= visibleRows) {
+        renderer.setCursorPosition(0, 0, false);
+        return;
+      }
     }
     state.cursorViewportRow = row;
     const x = viewerMarkdown.screenX + state.cursorColumn;
@@ -1406,14 +1454,27 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (state.route.type !== "document") {
       return;
     }
-    const sourceLine = state.markdownSource.split("\n")[state.cursorLine] ?? "";
-    const link = firstDocumentLink(sourceLine) ?? firstDocumentLink(state.documentLines[state.cursorLine] ?? "");
+    const link = firstRenderedDocumentLink(state.documentLines[state.cursorLine] ?? "");
     if (link === undefined) {
       showNotice("No link on current line");
       return;
     }
     if (link.kind === "external") {
       openUrlInBrowser(link.url);
+      return;
+    }
+    if (link.kind === "remoteMarkdown") {
+      void openRemoteMarkdownLink(link.url).catch((error: unknown) => {
+        showNotice(error instanceof Error ? `Remote open failed: ${error.message}` : "Remote open failed");
+      });
+      return;
+    }
+    const remoteBase = remoteDocuments.get(state.route.file.absolutePath)?.sourceUrl;
+    const remoteUrl = remoteBase === undefined ? undefined : resolveRemoteMarkdownUrl(remoteBase, link.target);
+    if (remoteUrl !== undefined) {
+      void openRemoteMarkdownLink(remoteUrl).catch((error: unknown) => {
+        showNotice(error instanceof Error ? `Remote open failed: ${error.message}` : "Remote open failed");
+      });
       return;
     }
     const targetFile = resolveInternalMarkdownFile(files, state.route.file, link.target);
@@ -1424,6 +1485,14 @@ export async function runTui(options: TuiOptions): Promise<void> {
     void openDocument(targetFile, { pushHistory: true }).catch((error: unknown) => {
       showNotice(error instanceof Error ? `Open link failed: ${error.message}` : "Open link failed");
     });
+  }
+
+  async function openRemoteMarkdownLink(url: string): Promise<void> {
+    showNotice(`Fetching ${url}…`);
+    const remote = await fetchRemoteMarkdown(url);
+    remoteDocuments.set(remote.file.absolutePath, { sourceUrl: remote.sourceUrl, tempDirectory: remote.tempDirectory });
+    await openDocument(remote.file, { pushHistory: true });
+    showNotice(`Opened ${remote.file.name} from ${new URL(remote.sourceUrl).hostname}`);
   }
 
   function openLinkAtScreenPosition(x: number, y: number): boolean {
@@ -1438,8 +1507,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     const previousColumn = state.cursorColumn;
     state.cursorLine = line;
     state.cursorColumn = Math.max(0, x - viewerMarkdown.screenX);
-    const sourceLine = state.markdownSource.split("\n")[line] ?? "";
-    const link = firstDocumentLink(sourceLine) ?? firstDocumentLink(state.documentLines[line] ?? "");
+    const link = firstRenderedDocumentLink(state.documentLines[line] ?? "");
     if (link === undefined) {
       state.cursorLine = previousLine;
       state.cursorColumn = previousColumn;
@@ -1489,6 +1557,72 @@ export async function runTui(options: TuiOptions): Promise<void> {
     return copied || copyToClipboard(text);
   }
 
+  function applyDocumentLayout(): void {
+    const effectiveWidth = currentDocumentRenderWidth();
+    viewerMarkdown.tableOptions = markdownTableOptions(state.wrapEnabled);
+    viewerMarkdown.width = effectiveWidth;
+  }
+
+  function refreshDocumentRender(): void {
+    if (state.markdownSource.length === 0) {
+      state.documentText = "";
+      state.documentLines = [];
+      state.searchMatches = [];
+      state.searchMatchIndex = -1;
+      return;
+    }
+    const rendered = renderMarkdownToAnsi(state.markdownSource, { width: currentDocumentRenderWidth(), color: false });
+    state.documentText = rendered;
+    state.documentLines = rendered.split("\n");
+    if (state.searchConfirmed || state.documentSearchActive) {
+      state.searchMatches = findAllSearchMatches(state.documentSearchQuery);
+      state.searchMatchIndex = state.searchMatches.length === 0 ? -1 : clamp(state.searchMatchIndex, 0, state.searchMatches.length - 1);
+    }
+    state.cursorLine = clamp(state.cursorLine, 0, Math.max(0, state.documentLines.length - 1));
+    state.cursorColumn = clamp(state.cursorColumn, 0, lineLength(state.cursorLine));
+  }
+
+  function currentDocumentRenderWidth(): number {
+    const zoomWidth = state.zoomLevel * 8;
+    const baseWidth = Math.max(40, renderer.terminalWidth - 8);
+    return state.wrapEnabled ? clamp(baseWidth + zoomWidth, 30, 400) : 400;
+  }
+
+  function clampScrollTop(): void {
+    const maxScroll = Math.max(0, state.documentLines.length - 1);
+    if (viewer.scrollTop > maxScroll) {
+      viewer.scrollTop = maxScroll;
+    }
+  }
+
+  function clampCursorToViewportStartIfNeeded(): void {
+    if (state.documentLines.length === 0) {
+      state.cursorLine = 0;
+      state.cursorColumn = 0;
+      state.cursorViewportRow = 0;
+      return;
+    }
+    const firstVisible = clamp(viewer.scrollTop, 0, state.documentLines.length - 1);
+    const lastVisible = clamp(firstVisible + visibleDocumentRows() - 1, 0, state.documentLines.length - 1);
+    if (state.cursorLine < firstVisible || state.cursorLine > lastVisible) {
+      state.cursorLine = firstVisible;
+      state.cursorColumn = 0;
+      state.cursorViewportRow = 0;
+    }
+  }
+
+  async function cleanupRemoteDocuments(): Promise<void> {
+    for (const [, meta] of remoteDocuments) {
+      try {
+        await rm(meta.tempDirectory, { recursive: true, force: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.emitWarning(`Unable to remove remote Markdown temp directory ${meta.tempDirectory}: ${message}`);
+      }
+    }
+    remoteDocuments.clear();
+  }
+
   function showNotice(message: string): void {
     noticeVersion += 1;
     const currentNoticeVersion = noticeVersion;
@@ -1532,7 +1666,7 @@ function isHelpScrollKey(key: KeyEvent): boolean {
 }
 
 function isHelpToggleInput(key: KeyEvent): boolean {
-  return key.ctrl && (key.name === "?" || key.name === "/" || key.sequence === "\u001F" || key.raw === "\u001F");
+  return key.ctrl && (key.name === "?" || key.name === "/" || key.sequence === "\u001F" || key.raw === "\u001F" || (key.shift && key.name === "/"));
 }
 
 function browserOpenCommand(url: string): { readonly executable: string; readonly args: readonly string[] } | undefined {
@@ -1614,6 +1748,20 @@ function formatSize(bytes: number): string {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function markdownTableOptions(wrapEnabled: boolean) {
+  return {
+    style: "grid" as const,
+    widthMode: "full" as const,
+    wrapMode: wrapEnabled ? "word" as const : "none" as const,
+    cellPadding: 1,
+    borders: true,
+    outerBorder: true,
+    borderStyle: "single" as const,
+    borderColor: "#8B8FA3",
+    selectable: true,
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {

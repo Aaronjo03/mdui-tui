@@ -11,12 +11,12 @@ export interface FooterState {
   readonly searchMatch?: string;
   readonly countPrefix?: string;
   readonly documentStats?: string;
+  readonly wrapEnabled?: boolean;
+  readonly zoomLevel?: number;
 }
 
 export function footerText(notice: string, state: FooterState = {}): string {
   const vimMode = state.vimMode ?? "normal";
-  const sidebarVisible = state.sidebarVisible ?? true;
-  const sidebarHelp = sidebarVisible ? "Tab hide sidebar" : "Tab/Esc sidebar";
   const cursor = state.cursorLine !== undefined && state.cursorColumn !== undefined ? ` • ${state.cursorLine}:${state.cursorColumn}` : "";
   const selection =
     state.selectionAnchorLine !== undefined && state.selectionAnchorColumn !== undefined && state.cursorLine !== undefined && state.cursorColumn !== undefined
@@ -26,7 +26,9 @@ export function footerText(notice: string, state: FooterState = {}): string {
   const search = state.searchQuery !== undefined ? ` • /${state.searchQuery}_${matchInfo}` : matchInfo.length > 0 ? ` • search${matchInfo}` : "";
   const count = state.countPrefix !== undefined && state.countPrefix.length > 0 ? ` • count ${state.countPrefix}` : "";
   const stats = state.documentStats !== undefined ? ` • ${state.documentStats}` : "";
-  const base = `${modeLabel(vimMode)}${cursor}${selection}${search}${count}${stats} • arrows/hjkl move • 8j counts • y yank visual • o open link • t ToC • ${sidebarHelp} • Ctrl-y Slack • Ctrl-p PDF • / search • Ctrl-/ help • q quit`;
+  const wrap = state.wrapEnabled === false ? " • wrap off" : "";
+  const zoom = state.zoomLevel !== undefined && state.zoomLevel !== 0 ? ` • zoom ${state.zoomLevel > 0 ? "+" : ""}${state.zoomLevel}` : "";
+  const base = `${modeLabel(vimMode)}${cursor}${selection}${search}${count}${stats}${wrap}${zoom} • arrows/hjkl move • Tab/Esc sidebar`;
   return notice.length > 0 ? `${base} • ${notice}` : base;
 }
 
@@ -46,6 +48,7 @@ export function cliHelpText(): string {
 
 Usage:
   mdui <file.md>   Render a Markdown file to stdout
+  mdui <url.md>    Fetch and render a remote Markdown URL
   mdui             Open the interactive Markdown finder
   mdui help        Show this help
 
@@ -77,6 +80,9 @@ Document keys:
   Ctrl-y           Copy current document as Slack mrkdwn
   Ctrl-p           Export current document to ~/Downloads/<filename>.pdf
   Ctrl-/ or Ctrl-? Toggle in-app help
+  Ctrl-Shift-?     Toggle in-app help in terminals that report Shift
+  Ctrl-+ / Ctrl--  Zoom content wrapping in / out
+  w                Toggle line wrapping
 `;
 }
 
@@ -114,7 +120,10 @@ Document
   o or Enter       Open the first link on the current line
   Ctrl-y           Copy Slack mrkdwn
   Ctrl-p           Export PDF to ~/Downloads
-  Ctrl-/ or Ctrl-? Close this panel
+  Ctrl-/ or Ctrl-? Toggle this panel
+  Ctrl-Shift-?     Toggle this panel in terminals that report Shift
+  Ctrl-+ / Ctrl--  Zoom content wrapping in / out
+  w                Toggle line wrapping on or off
   j/k or ↓/↑       Scroll this panel when it does not fit
 `;
 }

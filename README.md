@@ -1,6 +1,6 @@
 # MDUI
 
-MDUI is a Bun-powered terminal Markdown renderer built with strict TypeScript and OpenTUI. It opens a fast Markdown finder for a directory, renders documents in a read-only TUI, and adds vim-style navigation, search highlighting, visual selection, Slack/PDF export, line numbers, internal Markdown links, and compact in-app overlays.
+MDUI is a Bun-powered terminal Markdown renderer built with strict TypeScript and OpenTUI. It opens a fast Markdown finder for a directory, renders local or remote Markdown documents in a read-only TUI, and adds vim-style navigation, search highlighting, visual selection, Slack/PDF export, line numbers, internal Markdown links, and compact in-app overlays.
 
 > OpenTUI currently targets Bun, so MDUI runs on Bun rather than Node.
 
@@ -9,6 +9,7 @@ MDUI is a Bun-powered terminal Markdown renderer built with strict TypeScript an
 ## Features
 
 - Interactive Markdown finder rooted at the current directory.
+- Remote `.md` URL rendering, including in-app navigation for remote Markdown links.
 - Rich OpenTUI Markdown rendering with full-width grid tables and OSC-8 terminal hyperlinks.
 - Read-only vim-style navigation with counts (`8j`, `4k`, `42G`), `gg`/`G`, visual and visual-block selection.
 - Document search with cached matches, visible match highlights, and `n`/`N` repeat navigation.
@@ -16,7 +17,7 @@ MDUI is a Bun-powered terminal Markdown renderer built with strict TypeScript an
 - Internal Markdown navigation for relative `.md` links and `[[wikilinks]]`, with session back/forward history.
 - Visual-only line numbers that are excluded from copied content.
 - Clipboard helpers: copy selection/document through OSC52 with native clipboard fallbacks, copy Slack mrkdwn, and export PDF to `~/Downloads`.
-- `mdui help` and `Ctrl-/` / `Ctrl-?` in-app help.
+- `mdui help` and `Ctrl-/` / `Ctrl-?` / `Ctrl-Shift-?` in-app help.
 
 ## Install
 
@@ -34,6 +35,7 @@ After a global install, `mdui` is on your PATH. Just run:
 
 ```sh
 mdui README.md
+mdui https://telnyx.com/pricing.md
 mdui              # interactive finder
 mdui help
 ```
@@ -67,6 +69,7 @@ ln -sf "$PWD/dist/cli.js" ~/.local/bin/MDUI
 ## Usage
 
 - `mdui <file.md>` renders a Markdown file directly.
+- `mdui <https://example.com/file.md>` fetches and renders a remote Markdown file directly.
 - `mdui` opens an interactive Markdown finder rooted at the current directory.
 - `mdui help` prints CLI and in-app keybinding help.
 
@@ -104,14 +107,16 @@ After `bun run build`, the compiled binary entry is `dist/cli.js`. Chrome/Chromi
 | `v` / `Ctrl-v` | Start visual / visual-block selection |
 | `y` | Yank visual / visual-block selection and clear the highlight |
 | `c` | Copy highlighted text, or the whole document when nothing is highlighted |
-| `o` or `Enter` | Open the first link on the current line; relative Markdown links and `[[wikilinks]]` open inside MDUI |
+| `o` or `Enter` | Open the first link on the current line; relative Markdown links, remote `.md` URLs, and `[[wikilinks]]` open inside MDUI |
 | mouse click on a link line | Open the clicked-line link with the same internal/external routing |
 | `Ctrl-o` / `Ctrl-i` | Navigate back / forward through internal Markdown links |
 | `Ctrl-y` | Copy the current document as Slack mrkdwn |
 | `Ctrl-p` | Export the current document to `~/Downloads/<filename>.pdf` |
-| `Ctrl-/` or `Ctrl-?` | Toggle the in-app help panel |
+| `Ctrl-/`, `Ctrl-?`, or `Ctrl-Shift-?` | Toggle the in-app help panel |
+| `Ctrl-+` / `Ctrl--` | Increase or decrease document wrapping width |
+| `w` | Toggle line wrapping on or off |
 
-MDUI remembers the cursor line and scroll position per file for the current session only, watches the current file for changes, and reloads it in place. Line numbers are visual-only and are not part of copied Markdown content.
+MDUI remembers the cursor line and scroll position per file for the current session only, watches local files for changes, and reloads them in place. Remote Markdown documents are fetched into temporary local files for the session. Line numbers are visual-only and are not part of copied Markdown content.
 
 ## Configuration
 
@@ -190,7 +195,7 @@ mdui                      # interactive finder (requires TTY)
 
 **PDF export** requires Chrome, Chromium, or Edge on PATH. Uses `--headless=new` mode. Output goes to `pdfOutputDirectory` (default `~/Downloads/<filename>.pdf`).
 
-**Internal link resolution:** Relative `.md` paths and `[[wikilinks]]` resolve against the file's directory. External links (`http://`, `https://`) open in the default browser. Navigate back/forward with `Ctrl-o`/`Ctrl-i`.
+**Internal link resolution:** Relative Markdown paths and `[[wikilinks]]` resolve against the file's directory. Remote `.md` URLs open inside MDUI; other external links (`http://`, `https://`) open in the default browser. Navigate back/forward with `Ctrl-o`/`Ctrl-i`.
 
 **Clipboard chain:** OSC 52 → `pbcopy` (macOS) / `wl-copy` (Wayland) / `xclip` or `xsel` (X11) / `clip.exe` (Windows). All receive text on stdin — no shell injection surface.
 

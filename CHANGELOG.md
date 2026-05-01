@@ -11,12 +11,15 @@ All notable changes to MDUI are documented here.
 - Added internal Markdown navigation for relative `.md` links and `[[wikilinks]]`, including mouse activation and `Ctrl-o`/`Ctrl-i` history.
 - Added JSON configuration discovery via `MDUI_CONFIG`, `.mduirc`, `.mdui.json`, `mdui.config.json`, and XDG user config.
 - Added native clipboard fallbacks for macOS, Linux, and Windows after OSC52 copying.
+- Added remote `.md` URL rendering with in-app remote Markdown navigation, temp-backed session files, timeout/size limits, redirect validation, and terminal-control sanitization.
+- Added a compact footer, `Ctrl-/` / `Ctrl-?` / `Ctrl-Shift-?` help overlay access, default line wrapping with a `w` toggle, and `Ctrl-+` / `Ctrl--` wrap-width zoom controls.
 
 ### Changed
 
 - PDF export now lets Marked parse raw Markdown directly and sanitizes raw HTML in the renderer instead of pre-escaping Markdown text.
 - Markdown discovery can now skip additional configured directory names.
 - README and samples now document the expanded TUI controls and configuration surface.
+- Cursor recovery now clamps out-of-viewport positions back to the first visible document row.
 
 ## 0.1.1 - 2026-04-29
 
