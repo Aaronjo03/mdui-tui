@@ -45,6 +45,23 @@ export function nativeClipboardCommands(platform: NodeJS.Platform = process.plat
   }
 }
 
+export function nativeClipboardReadCommands(platform: NodeJS.Platform = process.platform): readonly ClipboardCommand[] {
+  switch (platform) {
+    case "darwin":
+      return [{ executable: "pbpaste", args: [] }];
+    case "win32":
+      return [{ executable: "powershell.exe", args: ["-NoProfile", "-Command", "Get-Clipboard"] }];
+    case "linux":
+      return [
+        { executable: "wl-paste", args: ["--no-newline"] },
+        { executable: "xclip", args: ["-selection", "clipboard", "-out"] },
+        { executable: "xsel", args: ["--clipboard", "--output"] },
+      ];
+    default:
+      return [];
+  }
+}
+
 export function copyWithNativeClipboard(text: string, commands: readonly ClipboardCommand[] = nativeClipboardCommands()): boolean {
   for (const command of commands) {
     const result = spawnSync(command.executable, command.args, {
@@ -59,4 +76,19 @@ export function copyWithNativeClipboard(text: string, commands: readonly Clipboa
     }
   }
   return false;
+}
+
+export function readFromNativeClipboard(commands: readonly ClipboardCommand[] = nativeClipboardReadCommands()): string | undefined {
+  for (const command of commands) {
+    const result = spawnSync(command.executable, command.args, {
+      encoding: "utf8",
+      shell: false,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+    });
+    if (result.status === 0 && result.error === undefined && typeof result.stdout === "string") {
+      return result.stdout;
+    }
+  }
+  return undefined;
 }
