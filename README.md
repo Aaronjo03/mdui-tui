@@ -107,8 +107,8 @@ After `bun run build`, the compiled binary entry is `dist/cli.js`. Chrome/Chromi
 | `v` / `Ctrl-v` | Start visual / visual-block selection |
 | `y` | Yank visual / visual-block selection and clear the highlight |
 | `c` | Copy highlighted text, or the whole document when nothing is highlighted |
-| `o` or `Enter` | Open the first link on the current line; relative Markdown links, remote `.md` URLs, and `[[wikilinks]]` open inside MDUI |
-| mouse click on a link line | Open the clicked-line link with the same internal/external routing |
+| `o` or `Enter` | Open the selected text link, or the link under the cursor; relative Markdown links, remote `.md` URLs, and `[[wikilinks]]` open inside MDUI |
+| mouse click on a link | Open the clicked link with the same internal/external routing |
 | `Ctrl-o` / `Ctrl-i` | Navigate back / forward through internal Markdown links |
 | `Ctrl-y` | Copy the current document as Slack mrkdwn |
 | `Ctrl-p` | Export the current document to `~/Downloads/<filename>.pdf` |

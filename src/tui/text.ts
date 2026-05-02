@@ -100,7 +100,7 @@ Document keys:
   v / Ctrl-v       Read-only visual / visual-block selection
   y                Yank visual / visual-block selection and clear highlight
   c                Copy highlighted text, or the document if nothing is highlighted
-  o or Enter       Open the first link on the current line
+  o or Enter       Open selected text link, or link under cursor
   Ctrl-y           Copy current document as Slack mrkdwn
   Ctrl-p           Export current document to ~/Downloads/<filename>.pdf
   Ctrl-u           Paste/type a remote Markdown URL to open in the TUI
@@ -142,7 +142,7 @@ Document
   v / Ctrl-v       Visual / visual-block selection
   y                Yank visual / visual-block selection and clear highlight
   c                Copy highlighted text, or the whole document
-  o or Enter       Open the first link on the current line
+  o or Enter       Open selected text link, or link under cursor
   Ctrl-y           Copy Slack mrkdwn
   Ctrl-p           Export PDF to ~/Downloads
   Ctrl-u           Paste/type a remote Markdown URL to open in the TUI
