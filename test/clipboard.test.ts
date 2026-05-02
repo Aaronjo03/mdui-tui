@@ -7,7 +7,9 @@ describe("OSC52 clipboard sequences", () => {
   });
 
   it("wraps OSC52 for tmux passthrough", () => {
-    expect(createOsc52Sequence("hello", { TMUX: "/tmp/tmux" })).toBe("\u001BPtmux;\u001B\u001B]52;c;aGVsbG8=\u0007\u001B\\");
+    expect(createOsc52Sequence("hello", { TMUX: "/tmp/tmux" })).toBe(
+      "\u001BPtmux;\u001B\u001B]52;c;aGVsbG8=\u0007\u001B\\",
+    );
   });
 
   it("uses native clipboard commands that accept stdin rather than argv text", () => {

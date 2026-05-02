@@ -64,7 +64,10 @@ mdui README.md
   });
 
   it("emits no ANSI escape sequences when color is disabled", () => {
-    const output = renderMarkdownToAnsi("# Title\n\n**bold** and [link](https://example.com)", { width: 80, color: false });
+    const output = renderMarkdownToAnsi("# Title\n\n**bold** and [link](https://example.com)", {
+      width: 80,
+      color: false,
+    });
 
     expect(output).not.toContain("\u001B[");
   });

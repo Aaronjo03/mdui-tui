@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { discoverMarkdownFiles, isMarkdownPath, type DirectoryEntry, type FileStat, type MarkdownFileSystem } from "../src/fs/markdownFiles.js";
+import {
+  discoverMarkdownFiles,
+  isMarkdownPath,
+  type DirectoryEntry,
+  type FileStat,
+  type MarkdownFileSystem,
+} from "../src/fs/markdownFiles.js";
 
 const tempRoots: string[] = [];
 

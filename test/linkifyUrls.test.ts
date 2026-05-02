@@ -3,7 +3,9 @@ import { linkifyBareUrls } from "../src/markdown/linkifyUrls.js";
 
 describe("linkifyBareUrls", () => {
   it("turns bare https URLs into markdown links", () => {
-    expect(linkifyBareUrls("See https://example.com/docs for docs.")).toBe("See [https://example.com/docs](https://example.com/docs) for docs.");
+    expect(linkifyBareUrls("See https://example.com/docs for docs.")).toBe(
+      "See [https://example.com/docs](https://example.com/docs) for docs.",
+    );
   });
 
   it("adds https hrefs for www URLs", () => {

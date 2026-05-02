@@ -3,7 +3,10 @@ import { closestSearchMatchIndex, findSearchMatches, wrapSearchMatchIndex } from
 
 describe("document search helpers", () => {
   it("finds case-insensitive overlapping matches", () => {
-    expect(findSearchMatches(["Banana", "band"], "ana")).toEqual([{ line: 0, column: 1, length: 3 }, { line: 0, column: 3, length: 3 }]);
+    expect(findSearchMatches(["Banana", "band"], "ana")).toEqual([
+      { line: 0, column: 1, length: 3 },
+      { line: 0, column: 3, length: 3 },
+    ]);
   });
 
   it("chooses the closest match at or after the cursor and wraps indices", () => {

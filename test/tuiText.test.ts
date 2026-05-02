@@ -66,7 +66,10 @@ describe("TUI text helpers", () => {
   });
 
   it("shows URL entry mode in the header", () => {
-    const header = headerText("", 4, 4, false, "normal", true, { active: true, query: "https://telnyx.com/pricing.md" });
+    const header = headerText("", 4, 4, false, "normal", true, {
+      active: true,
+      query: "https://telnyx.com/pricing.md",
+    });
 
     expect(header).toContain("URL: https://telnyx.com/pricing.md_");
     expect(header).toContain("Enter opens remote Markdown");
@@ -74,7 +77,16 @@ describe("TUI text helpers", () => {
   });
 
   it("shows document search mode in the header", () => {
-    const header = headerText("", 4, 4, false, "normal", false, { active: false, query: "" }, { active: true, query: "price", match: "1/3" });
+    const header = headerText(
+      "",
+      4,
+      4,
+      false,
+      "normal",
+      false,
+      { active: false, query: "" },
+      { active: true, query: "price", match: "1/3" },
+    );
 
     expect(header).toContain("search: /price_");
     expect(header).toContain("[1/3]");
@@ -83,7 +95,16 @@ describe("TUI text helpers", () => {
   });
 
   it("shows confirmed document search state in the header", () => {
-    const header = headerText("", 4, 4, false, "normal", false, { active: false, query: "" }, { active: true, query: "price", match: "2/3" });
+    const header = headerText(
+      "",
+      4,
+      4,
+      false,
+      "normal",
+      false,
+      { active: false, query: "" },
+      { active: true, query: "price", match: "2/3" },
+    );
 
     expect(header).toContain("search: /price_");
     expect(header).toContain("[2/3]");
