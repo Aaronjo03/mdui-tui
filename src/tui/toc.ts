@@ -26,13 +26,15 @@ export function formatToc(entries: readonly TocEntry[]): string {
   if (entries.length === 0) {
     return "No headings in this document.";
   }
-  return entries.map((entry) => `${"  ".repeat(Math.max(0, entry.depth - 1))}${entry.line + 1}. ${entry.text}`).join("\n");
+  return entries
+    .map((entry) => `${"  ".repeat(Math.max(0, entry.depth - 1))}${entry.line + 1}. ${entry.text}`)
+    .join("\n");
 }
 
 function stripInlineMarkdown(value: string): string {
   return value
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/[\*_~]/g, "")
+    .replace(/[*_~]/g, "")
     .trim();
 }
