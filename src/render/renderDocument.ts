@@ -76,14 +76,20 @@ function appendBlock(lines: string[], block: MarkdownBlock, options: RenderOptio
       block.items.forEach((item, index) => {
         const marker = block.ordered ? `${index + 1}. ` : "• ";
         const styledMarker = style(marker, options.color, ...theme.listMarker);
-        const wrapped = wrapLine(`${styledMarker}${renderInline(item, options.color, theme)}`, options.width, " ".repeat(marker.length));
+        const wrapped = wrapLine(
+          `${styledMarker}${renderInline(item, options.color, theme)}`,
+          options.width,
+          " ".repeat(marker.length),
+        );
         lines.push(...wrapped);
       });
       lines.push("");
       return;
     }
     case "code": {
-      lines.push(style(block.language !== undefined ? `┌─ ${block.language}` : "┌─ code", options.color, ...theme.muted));
+      lines.push(
+        style(block.language !== undefined ? `┌─ ${block.language}` : "┌─ code", options.color, ...theme.muted),
+      );
       for (const codeLine of block.code.split("\n")) {
         lines.push(style(`│ ${codeLine}`, options.color, ...theme.codeBlock));
       }
@@ -214,7 +220,11 @@ function renderTableRow(
       const padded = padCell(value, width, alignment);
       return header ? style(padded, color, ...theme.tableHeader) : padded;
     });
-    return style("│", color, ansi.gray) + cells.map((cell) => ` ${cell} `).join(style("│", color, ansi.gray)) + style("│", color, ansi.gray);
+    return (
+      style("│", color, ansi.gray) +
+      cells.map((cell) => ` ${cell} `).join(style("│", color, ansi.gray)) +
+      style("│", color, ansi.gray)
+    );
   });
 }
 

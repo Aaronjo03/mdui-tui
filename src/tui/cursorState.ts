@@ -21,9 +21,10 @@ export function syncCursorToViewportState(
 
   const firstVisibleLine = clamp(viewport.scrollTop, 0, viewport.documentLineCount - 1);
   const lastVisibleLine = clamp(firstVisibleLine + viewport.visibleRows - 1, 0, viewport.documentLineCount - 1);
-  const cursorLine = cursor.cursorLine < firstVisibleLine || cursor.cursorLine > lastVisibleLine
-    ? clamp(firstVisibleLine + cursor.cursorViewportRow, firstVisibleLine, lastVisibleLine)
-    : clamp(cursor.cursorLine, firstVisibleLine, lastVisibleLine);
+  const cursorLine =
+    cursor.cursorLine < firstVisibleLine || cursor.cursorLine > lastVisibleLine
+      ? clamp(firstVisibleLine + cursor.cursorViewportRow, firstVisibleLine, lastVisibleLine)
+      : clamp(cursor.cursorLine, firstVisibleLine, lastVisibleLine);
 
   return {
     cursorLine,

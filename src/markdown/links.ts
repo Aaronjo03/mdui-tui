@@ -14,7 +14,9 @@ export function firstDocumentLink(line: string): ParsedDocumentLink | undefined 
     if (external === undefined) {
       return { kind: "internal", target };
     }
-    return isRemoteMarkdownUrl(external) ? { kind: "remoteMarkdown", url: external } : { kind: "external", url: external };
+    return isRemoteMarkdownUrl(external)
+      ? { kind: "remoteMarkdown", url: external }
+      : { kind: "external", url: external };
   }
 
   const wikiLink = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/.exec(line);
@@ -26,11 +28,17 @@ export function firstDocumentLink(line: string): ParsedDocumentLink | undefined 
   if (bareUrl === null) {
     return undefined;
   }
-  const normalized = normalizeHttpUrl(bareUrl[0].replace(/[.,;:!?]+$/, "").startsWith("www.") ? `https://${bareUrl[0].replace(/[.,;:!?]+$/, "")}` : bareUrl[0].replace(/[.,;:!?]+$/, ""));
+  const normalized = normalizeHttpUrl(
+    bareUrl[0].replace(/[.,;:!?]+$/, "").startsWith("www.")
+      ? `https://${bareUrl[0].replace(/[.,;:!?]+$/, "")}`
+      : bareUrl[0].replace(/[.,;:!?]+$/, ""),
+  );
   if (normalized === undefined) {
     return undefined;
   }
-  return isRemoteMarkdownUrl(normalized) ? { kind: "remoteMarkdown", url: normalized } : { kind: "external", url: normalized };
+  return isRemoteMarkdownUrl(normalized)
+    ? { kind: "remoteMarkdown", url: normalized }
+    : { kind: "external", url: normalized };
 }
 
 export function firstRenderedDocumentLink(line: string): ParsedDocumentLink | undefined {
@@ -42,7 +50,9 @@ export function renderedDocumentLinkAt(line: string, column: number): ParsedDocu
   return candidates.find((candidate) => column >= candidate.start && column < candidate.end)?.link;
 }
 
-function renderedDocumentLinkCandidates(line: string): Array<{ readonly start: number; readonly end: number; readonly link: ParsedDocumentLink }> {
+function renderedDocumentLinkCandidates(
+  line: string,
+): Array<{ readonly start: number; readonly end: number; readonly link: ParsedDocumentLink }> {
   const candidates: Array<{ readonly start: number; readonly end: number; readonly link: ParsedDocumentLink }> = [];
 
   const markdownLink = /\[[^\]]+\]\(([^)]+)\)/g;
@@ -64,7 +74,11 @@ function renderedDocumentLinkCandidates(line: string): Array<{ readonly start: n
       break;
     }
     if (match[1] !== undefined) {
-      candidates.push({ start: match.index, end: match.index + match[0].length, link: { kind: "internal", target: match[1].trim() } });
+      candidates.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        link: { kind: "internal", target: match[1].trim() },
+      });
     }
   }
 
@@ -80,7 +94,9 @@ function renderedDocumentLinkCandidates(line: string): Array<{ readonly start: n
       candidates.push({
         start: match.index,
         end: match.index + rawTarget.length,
-        link: isRemoteMarkdownUrl(normalized) ? { kind: "remoteMarkdown", url: normalized } : { kind: "external", url: normalized },
+        link: isRemoteMarkdownUrl(normalized)
+          ? { kind: "remoteMarkdown", url: normalized }
+          : { kind: "external", url: normalized },
       });
     }
   }
@@ -107,7 +123,9 @@ function renderedDocumentLinkCandidates(line: string): Array<{ readonly start: n
 function linkFromTarget(target: string): ParsedDocumentLink {
   const external = normalizeHttpUrl(target);
   if (external !== undefined) {
-    return isRemoteMarkdownUrl(external) ? { kind: "remoteMarkdown", url: external } : { kind: "external", url: external };
+    return isRemoteMarkdownUrl(external)
+      ? { kind: "remoteMarkdown", url: external }
+      : { kind: "external", url: external };
   }
   return { kind: "internal", target };
 }
@@ -115,12 +133,18 @@ function linkFromTarget(target: string): ParsedDocumentLink {
 function linkFromRenderedTarget(target: string): ParsedDocumentLink | undefined {
   const external = normalizeHttpUrl(target);
   if (external !== undefined) {
-    return isRemoteMarkdownUrl(external) ? { kind: "remoteMarkdown", url: external } : { kind: "external", url: external };
+    return isRemoteMarkdownUrl(external)
+      ? { kind: "remoteMarkdown", url: external }
+      : { kind: "external", url: external };
   }
   return isPotentialInternalMarkdownTarget(target) ? { kind: "internal", target } : undefined;
 }
 
-export function resolveInternalMarkdownFile(files: readonly MarkdownFile[], currentFile: MarkdownFile, target: string): MarkdownFile | undefined {
+export function resolveInternalMarkdownFile(
+  files: readonly MarkdownFile[],
+  currentFile: MarkdownFile,
+  target: string,
+): MarkdownFile | undefined {
   const cleanTarget = target.split("#", 1)[0]?.trim();
   if (cleanTarget === undefined || cleanTarget.length === 0 || /^[a-z][a-z0-9+.-]*:/i.test(cleanTarget)) {
     return undefined;
@@ -139,8 +163,15 @@ function candidateRelativePaths(currentRelativePath: string, target: string): Se
 }
 
 function findByWikiStem(files: readonly MarkdownFile[], target: string): MarkdownFile | undefined {
-  const normalizedTarget = normalizePath(target).replace(/\.(?:md|markdown|mdown|mkdn|mkd)$/i, "").toLowerCase();
-  return files.find((file) => normalizePath(file.relativePath).replace(/\.(?:md|markdown|mdown|mkdn|mkd)$/i, "").toLowerCase() === normalizedTarget);
+  const normalizedTarget = normalizePath(target)
+    .replace(/\.(?:md|markdown|mdown|mkdn|mkd)$/i, "")
+    .toLowerCase();
+  return files.find(
+    (file) =>
+      normalizePath(file.relativePath)
+        .replace(/\.(?:md|markdown|mdown|mkdn|mkd)$/i, "")
+        .toLowerCase() === normalizedTarget,
+  );
 }
 
 function normalizePath(path: string): string {

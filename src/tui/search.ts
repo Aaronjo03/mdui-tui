@@ -26,12 +26,18 @@ export function findSearchMatches(lines: readonly string[], query: string): read
   return matches;
 }
 
-export function closestSearchMatchIndex(matches: readonly SearchMatch[], cursorLine: number, cursorColumn: number): number {
+export function closestSearchMatchIndex(
+  matches: readonly SearchMatch[],
+  cursorLine: number,
+  cursorColumn: number,
+): number {
   if (matches.length === 0) {
     return -1;
   }
 
-  const index = matches.findIndex((match) => match.line > cursorLine || (match.line === cursorLine && match.column >= cursorColumn));
+  const index = matches.findIndex(
+    (match) => match.line > cursorLine || (match.line === cursorLine && match.column >= cursorColumn),
+  );
   return index >= 0 ? index : 0;
 }
 

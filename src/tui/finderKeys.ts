@@ -297,5 +297,12 @@ function isCountDigit(key: FinderKeyInput, countPrefix: string): boolean {
 }
 
 function isHelpKey(key: FinderKeyInput): boolean {
-  return key.ctrl && (key.name === "?" || key.name === "/" || key.sequence === "\u001F" || key.raw === "\u001F" || (key.shift === true && key.name === "/"));
+  return (
+    key.ctrl &&
+    (key.name === "?" ||
+      key.name === "/" ||
+      key.sequence === "\u001F" ||
+      key.raw === "\u001F" ||
+      (key.shift === true && key.name === "/"))
+  );
 }
