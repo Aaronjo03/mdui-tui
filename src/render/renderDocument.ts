@@ -92,7 +92,7 @@ function appendBlock(lines: string[], block: MarkdownBlock, options: RenderOptio
       return;
     }
     case "table": {
-      lines.push(...renderTable(block.headers, block.alignments, block.rows, options.color, theme));
+      lines.push(...renderTable(block.headers, block.alignments, block.rows, options.width, options.color, theme));
       lines.push("");
       return;
     }
@@ -131,24 +131,69 @@ function renderTable(
   headers: readonly string[],
   alignments: readonly TableAlignment[],
   rows: readonly (readonly string[])[],
+  maxWidth: number,
   color: boolean,
   theme: MarkdownTheme,
 ): string[] {
-  const widths = headers.map((header, columnIndex) => {
+  const intrinsicWidths = headers.map((header, columnIndex) => {
     const rowWidths = rows.map((row) => visibleLength(row[columnIndex] ?? ""));
     return Math.max(visibleLength(header), ...rowWidths, 3);
   });
+  const widths = constrainTableWidths(intrinsicWidths, maxWidth);
 
   const top = `┌${widths.map((width) => "─".repeat(width + 2)).join("┬")}┐`;
   const divider = `├${widths.map((width) => "─".repeat(width + 2)).join("┼")}┤`;
   const bottom = `└${widths.map((width) => "─".repeat(width + 2)).join("┴")}┘`;
   return [
     style(top, color, ansi.gray),
-    renderTableRow(headers, widths, alignments, color, theme, true),
+    ...renderTableRow(headers, widths, alignments, color, theme, true),
     style(divider, color, ansi.gray),
-    ...rows.map((row) => renderTableRow(row, widths, alignments, color, theme, false)),
+    ...rows.flatMap((row) => renderTableRow(row, widths, alignments, color, theme, false)),
     style(bottom, color, ansi.gray),
   ];
+}
+
+function constrainTableWidths(intrinsicWidths: readonly number[], maxWidth: number): readonly number[] {
+  if (intrinsicWidths.length === 0) {
+    return [];
+  }
+  const minimumCellWidth = 3;
+  const tableOverhead = intrinsicWidths.length * 3 + 1;
+  const minimumContentWidth = intrinsicWidths.length * minimumCellWidth;
+  const contentWidth = Math.max(minimumContentWidth, Math.max(8, maxWidth) - tableOverhead);
+  const intrinsicContentWidth = intrinsicWidths.reduce((total, width) => total + width, 0);
+  if (intrinsicContentWidth <= contentWidth) {
+    return intrinsicWidths;
+  }
+
+  const widths = intrinsicWidths.map(() => minimumCellWidth);
+  let remaining = contentWidth - minimumContentWidth;
+  while (remaining > 0) {
+    const columnIndex = widestUnfilledColumn(widths, intrinsicWidths);
+    if (columnIndex === undefined) {
+      break;
+    }
+    const width = widths[columnIndex];
+    if (width === undefined) {
+      break;
+    }
+    widths[columnIndex] = width + 1;
+    remaining -= 1;
+  }
+  return widths;
+}
+
+function widestUnfilledColumn(widths: readonly number[], intrinsicWidths: readonly number[]): number | undefined {
+  let selectedIndex: number | undefined;
+  let selectedDeficit = 0;
+  for (const [index, width] of widths.entries()) {
+    const deficit = (intrinsicWidths[index] ?? width) - width;
+    if (deficit > selectedDeficit) {
+      selectedDeficit = deficit;
+      selectedIndex = index;
+    }
+  }
+  return selectedIndex;
 }
 
 function renderTableRow(
@@ -158,14 +203,72 @@ function renderTableRow(
   color: boolean,
   theme: MarkdownTheme,
   header: boolean,
-): string {
-  const cells = widths.map((width, index) => {
-    const value = row[index] ?? "";
-    const alignment = alignments[index] ?? "left";
-    const padded = padCell(value, width, alignment);
-    return header ? style(padded, color, ...theme.tableHeader) : padded;
+): string[] {
+  const wrappedCells = widths.map((width, index) => wrapTableCell(row[index] ?? "", width));
+  const rowHeight = Math.max(...wrappedCells.map((cellLines) => cellLines.length), 1);
+
+  return Array.from({ length: rowHeight }, (_, rowIndex) => {
+    const cells = widths.map((width, index) => {
+      const value = wrappedCells[index]?.[rowIndex] ?? "";
+      const alignment = alignments[index] ?? "left";
+      const padded = padCell(value, width, alignment);
+      return header ? style(padded, color, ...theme.tableHeader) : padded;
+    });
+    return style("│", color, ansi.gray) + cells.map((cell) => ` ${cell} `).join(style("│", color, ansi.gray)) + style("│", color, ansi.gray);
   });
-  return style("│", color, ansi.gray) + cells.map((cell) => ` ${cell} `).join(style("│", color, ansi.gray)) + style("│", color, ansi.gray);
+}
+
+function wrapTableCell(value: string, width: number): readonly string[] {
+  const safeWidth = Math.max(1, width);
+  if (visibleLength(value) <= safeWidth) {
+    return [value];
+  }
+
+  const words = value.split(/(\s+)/).filter((part) => part.length > 0);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = `${current}${word}`;
+    const trimmedWord = word.trimStart();
+    if (visibleLength(trimmedWord) > safeWidth) {
+      if (current.trim().length > 0) {
+        lines.push(current.trimEnd());
+      }
+      const chunks = chunkVisibleText(trimmedWord, safeWidth);
+      const last = chunks.at(-1);
+      lines.push(...chunks.slice(0, -1));
+      current = last ?? "";
+    } else if (current.length > 0 && visibleLength(candidate) > safeWidth) {
+      if (current.trim().length > 0) {
+        lines.push(current.trimEnd());
+      }
+      current = trimmedWord;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.trim().length > 0) {
+    lines.push(current.trimEnd());
+  }
+  return lines.length === 0 ? [""] : lines;
+}
+
+function chunkVisibleText(value: string, width: number): readonly string[] {
+  const lines: string[] = [];
+  let current = "";
+  for (const character of value) {
+    const candidate = `${current}${character}`;
+    if (visibleLength(candidate) > width) {
+      lines.push(current);
+      current = character;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) {
+    lines.push(current);
+  }
+  return lines;
 }
 
 function padCell(value: string, width: number, alignment: TableAlignment): string {

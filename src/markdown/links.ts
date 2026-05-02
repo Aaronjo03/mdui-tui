@@ -34,23 +34,54 @@ export function firstDocumentLink(line: string): ParsedDocumentLink | undefined 
 }
 
 export function firstRenderedDocumentLink(line: string): ParsedDocumentLink | undefined {
-  const candidates: Array<{ readonly index: number; readonly link: ParsedDocumentLink }> = [];
-  const markdownLink = /\[[^\]]+\]\(([^)]+)\)/.exec(line);
-  const markdownTarget = markdownLink?.[1]?.trim().replace(/^<|>$/g, "");
-  if (markdownLink !== null && markdownTarget !== undefined && markdownTarget.length > 0) {
-    candidates.push({ index: markdownLink.index, link: linkFromTarget(markdownTarget) });
+  return renderedDocumentLinkCandidates(line).sort((left, right) => left.start - right.start)[0]?.link;
+}
+
+export function renderedDocumentLinkAt(line: string, column: number): ParsedDocumentLink | undefined {
+  const candidates = renderedDocumentLinkCandidates(line);
+  return candidates.find((candidate) => column >= candidate.start && column < candidate.end)?.link;
+}
+
+function renderedDocumentLinkCandidates(line: string): Array<{ readonly start: number; readonly end: number; readonly link: ParsedDocumentLink }> {
+  const candidates: Array<{ readonly start: number; readonly end: number; readonly link: ParsedDocumentLink }> = [];
+
+  const markdownLink = /\[[^\]]+\]\(([^)]+)\)/g;
+  for (;;) {
+    const match = markdownLink.exec(line);
+    if (match === null) {
+      break;
+    }
+    const target = match[1]?.trim().replace(/^<|>$/g, "");
+    if (target !== undefined && target.length > 0) {
+      candidates.push({ start: match.index, end: match.index + match[0].length, link: linkFromTarget(target) });
+    }
   }
 
-  const wikiLink = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/.exec(line);
-  if (wikiLink?.[1] !== undefined) {
-    candidates.push({ index: wikiLink.index, link: { kind: "internal", target: wikiLink[1].trim() } });
+  const wikiLink = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
+  for (;;) {
+    const match = wikiLink.exec(line);
+    if (match === null) {
+      break;
+    }
+    if (match[1] !== undefined) {
+      candidates.push({ start: match.index, end: match.index + match[0].length, link: { kind: "internal", target: match[1].trim() } });
+    }
   }
 
-  const bareUrl = /(?:https?:\/\/[^\s)]+|www\.[^\s)]+)/.exec(line);
-  if (bareUrl !== null) {
-    const normalized = normalizeHttpUrl(bareUrl[0].replace(/[.,;:!?]+$/, "").startsWith("www.") ? `https://${bareUrl[0].replace(/[.,;:!?]+$/, "")}` : bareUrl[0].replace(/[.,;:!?]+$/, ""));
+  const bareUrl = /(?:https?:\/\/[^\s)]+|www\.[^\s)]+)/g;
+  for (;;) {
+    const match = bareUrl.exec(line);
+    if (match === null) {
+      break;
+    }
+    const rawTarget = match[0].replace(/[.,;:!?]+$/, "");
+    const normalized = normalizeHttpUrl(rawTarget.startsWith("www.") ? `https://${rawTarget}` : rawTarget);
     if (normalized !== undefined) {
-      candidates.push({ index: bareUrl.index, link: isRemoteMarkdownUrl(normalized) ? { kind: "remoteMarkdown", url: normalized } : { kind: "external", url: normalized } });
+      candidates.push({
+        start: match.index,
+        end: match.index + rawTarget.length,
+        link: isRemoteMarkdownUrl(normalized) ? { kind: "remoteMarkdown", url: normalized } : { kind: "external", url: normalized },
+      });
     }
   }
 
@@ -66,11 +97,11 @@ export function firstRenderedDocumentLink(line: string): ParsedDocumentLink | un
     }
     const link = linkFromRenderedTarget(target);
     if (link !== undefined) {
-      candidates.push({ index: match.index, link });
+      candidates.push({ start: match.index, end: match.index + match[0].length, link });
     }
   }
 
-  return candidates.sort((left, right) => left.index - right.index)[0]?.link;
+  return candidates;
 }
 
 function linkFromTarget(target: string): ParsedDocumentLink {

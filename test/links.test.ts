@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarkdownFile } from "../src/fs/markdownFiles.js";
-import { firstDocumentLink, firstRenderedDocumentLink, resolveInternalMarkdownFile } from "../src/markdown/links.js";
+import { firstDocumentLink, firstRenderedDocumentLink, renderedDocumentLinkAt, resolveInternalMarkdownFile } from "../src/markdown/links.js";
 
 describe("document link helpers", () => {
   const files: readonly MarkdownFile[] = [makeFile("README.md"), makeFile("docs/guide.md"), makeFile("notes/Daily Note.md")];
@@ -28,6 +28,21 @@ describe("document link helpers", () => {
   it("returns the earliest valid rendered link candidate", () => {
     expect(firstRenderedDocumentLink("Guide (guide) and Site (https://example.com)")).toEqual({ kind: "internal", target: "guide" });
     expect(firstRenderedDocumentLink("Guide (docs/guide.md) and Pricing (https://telnyx.com/pricing.md)")).toEqual({ kind: "internal", target: "docs/guide.md" });
+  });
+
+  it("finds the rendered link under the cursor instead of the first link on the row", () => {
+    const line = "Guide (guide) and Pricing (https://telnyx.com/pricing.md)";
+
+    expect(renderedDocumentLinkAt(line, line.indexOf("guide") + 1)).toEqual({ kind: "internal", target: "guide" });
+    expect(renderedDocumentLinkAt(line, line.indexOf("pricing.md") + 1)).toEqual({ kind: "remoteMarkdown", url: "https://telnyx.com/pricing.md" });
+    expect(renderedDocumentLinkAt(line, line.indexOf("and"))).toBeUndefined();
+  });
+
+  it("finds bare rendered URLs under the cursor in command snippets", () => {
+    const line = "│ mdui https://telnyx.com/pricing.md";
+
+    expect(renderedDocumentLinkAt(line, line.indexOf("mdui") + 1)).toBeUndefined();
+    expect(renderedDocumentLinkAt(line, line.indexOf("telnyx") + 1)).toEqual({ kind: "remoteMarkdown", url: "https://telnyx.com/pricing.md" });
   });
 
   it("resolves relative markdown links and wikilinks to discovered files", () => {
