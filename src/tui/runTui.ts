@@ -22,10 +22,11 @@ import { markdownToSlackMrkdwn } from "../export/slack.js";
 import { discoverMarkdownFiles, type MarkdownFile } from "../fs/markdownFiles.js";
 import { fetchRemoteMarkdown, resolveRemoteMarkdownUrl, type RemoteMarkdownDocument } from "../fs/remoteMarkdown.js";
 import { filterFiles, type RankedFile } from "../finder/filterFiles.js";
-import { firstRenderedDocumentLink, resolveInternalMarkdownFile } from "../markdown/links.js";
+import { firstRenderedDocumentLink, renderedDocumentLinkAt, resolveInternalMarkdownFile, type ParsedDocumentLink } from "../markdown/links.js";
 import { renderMarkdownToAnsi } from "../render/markdownToAnsi.js";
 import { copyToClipboard, readFromNativeClipboard } from "./clipboard.js";
 import { syncCursorToViewportState } from "./cursorState.js";
+import { documentRenderWidth, lineNumberGutterWidth } from "./documentRenderWidth.js";
 import { isStableFileSnapshot, shouldReloadFileByMtime } from "./fileReload.js";
 import { documentStats, formatDocumentStats, type DocumentStats } from "./documentStats.js";
 import { decideFinderKey, type VimMode } from "./finderKeys.js";
@@ -419,7 +420,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
   const lineNumbers = new TextRenderable(renderer, {
     id: "mdui-line-numbers",
     content: "",
-    width: 5,
+    width: lineNumberGutterWidth(0),
     fg: "#7DD3FC",
     flexShrink: 0,
     visible: false,
@@ -562,8 +563,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
         state.searchMatchIndex = -1;
         state.tocVisible = false;
         refreshChrome();
-        applySidebarVisibility();
-        updateDocumentCursor();
+        void applySidebarVisibilityAndRefreshDocument();
         finder.focus();
         key.preventDefault();
         return;
@@ -571,7 +571,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
         rememberCurrentDocumentPosition();
         state.sidebarVisible = !state.sidebarVisible;
         refreshChrome();
-        applySidebarVisibility();
+        void applySidebarVisibilityAndRefreshDocument();
         if (state.sidebarVisible) {
           state.documentSearchActive = false;
           state.documentSearchQuery = "";
@@ -582,7 +582,6 @@ export async function runTui(options: TuiOptions): Promise<void> {
         } else {
           viewer.focus();
         }
-        updateDocumentCursor();
         key.preventDefault();
         return;
       case "enterVisualMode":
@@ -707,8 +706,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
       case "zoomIn":
         state.countPrefix = "";
         state.zoomLevel = clamp(state.zoomLevel + 1, -4, 6);
-        applyDocumentLayout();
         refreshDocumentRender();
+        applyDocumentLayout();
         clampScrollTop();
         clampCursorToViewportStartIfNeeded();
         refreshChrome();
@@ -720,8 +719,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
       case "zoomOut":
         state.countPrefix = "";
         state.zoomLevel = clamp(state.zoomLevel - 1, -4, 6);
-        applyDocumentLayout();
         refreshDocumentRender();
+        applyDocumentLayout();
         clampScrollTop();
         clampCursorToViewportStartIfNeeded();
         refreshChrome();
@@ -759,8 +758,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
       case "toggleWrap":
         state.wrapEnabled = !state.wrapEnabled;
         state.countPrefix = "";
-        applyDocumentLayout();
         refreshDocumentRender();
+        applyDocumentLayout();
         clampScrollTop();
         clampCursorToViewportStartIfNeeded();
         refreshChrome();
@@ -1020,12 +1019,13 @@ export async function runTui(options: TuiOptions): Promise<void> {
     state.countPrefix = "";
     state.tocVisible = false;
     renderer.clearSelection();
+    applySidebarVisibility();
+    await waitForRendererIdle();
     const loaded = await loadDocument(file);
     if (!loaded) {
       return;
     }
     refreshChrome();
-    applySidebarVisibility();
     watchCurrentFile(file);
     await placeDocumentCursorAfterLayout();
     viewer.focus();
@@ -1092,12 +1092,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   async function waitForRendererIdle(): Promise<void> {
-    await Promise.race([
-      renderer.idle(),
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, 16);
-      }),
-    ]);
+    await renderer.idle();
   }
 
   function refreshFinder(): void {
@@ -1118,6 +1113,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
     });
     footer.content = footerText(state.notice, footerState());
     lineNumbers.visible = state.route.type === "document";
+    lineNumbers.width = lineNumberGutterWidth(state.documentLines.length);
     lineNumbers.content = state.route.type === "document" ? lineNumberText(state.documentLines.length) : "";
     helpPanel.visible = state.helpVisible;
     tocPanel.visible = state.tocVisible;
@@ -1145,7 +1141,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function lineNumberText(lineCount: number): string {
-    const width = Math.max(3, String(Math.max(1, lineCount)).length);
+    const width = lineNumberGutterWidth(lineCount) - 1;
     return Array.from({ length: Math.max(1, lineCount) }, (_, index) => `${String(index).padStart(width, " ")} `).join("\n");
   }
 
@@ -1381,6 +1377,25 @@ export async function runTui(options: TuiOptions): Promise<void> {
     renderer.requestRender();
   }
 
+  async function applySidebarVisibilityAndRefreshDocument(): Promise<void> {
+    applySidebarVisibility();
+    if (state.route.type !== "document") {
+      return;
+    }
+    const absolutePath = state.route.file.absolutePath;
+    await waitForRendererIdle();
+    if (state.route.type !== "document" || state.route.file.absolutePath !== absolutePath) {
+      return;
+    }
+    refreshDocumentRender();
+    applyDocumentLayout();
+    clampScrollTop();
+    clampCursorToViewportStartIfNeeded();
+    refreshChrome();
+    updateDocumentCursor();
+    updateVisualSelection();
+  }
+
   function moveDocumentCursor(lineDelta: number, columnDelta: number): void {
     if (state.documentLines.length === 0) {
       return;
@@ -1587,9 +1602,21 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (state.route.type !== "document") {
       return;
     }
-    const link = firstRenderedDocumentLink(state.documentLines[state.cursorLine] ?? "");
+    const link = selectedRenderedDocumentLink() ?? renderedDocumentLinkAt(state.documentLines[state.cursorLine] ?? "", state.cursorColumn);
     if (link === undefined) {
-      showNotice("No link on current line");
+      showNotice("No link at cursor");
+      return;
+    }
+    openDocumentLink(link);
+  }
+
+  function selectedRenderedDocumentLink(): ParsedDocumentLink | undefined {
+    const selectedText = renderer.getSelection()?.getSelectedText().trim();
+    return selectedText !== undefined && selectedText.length > 0 ? firstRenderedDocumentLink(selectedText) : undefined;
+  }
+
+  function openDocumentLink(link: ParsedDocumentLink): void {
+    if (state.route.type !== "document") {
       return;
     }
     if (link.kind === "external") {
@@ -1655,17 +1682,18 @@ export async function runTui(options: TuiOptions): Promise<void> {
     const previousLine = state.cursorLine;
     const previousColumn = state.cursorColumn;
     const previousPreferredColumn = state.cursorPreferredColumn;
-    state.cursorLine = line;
-    state.cursorColumn = Math.max(0, x - viewerMarkdown.screenX);
-    state.cursorPreferredColumn = state.cursorColumn;
-    const link = firstRenderedDocumentLink(state.documentLines[line] ?? "");
+    const column = Math.max(0, x - viewerMarkdown.screenX);
+    const link = renderedDocumentLinkAt(state.documentLines[line] ?? "", column);
     if (link === undefined) {
       state.cursorLine = previousLine;
       state.cursorColumn = previousColumn;
       state.cursorPreferredColumn = previousPreferredColumn;
       return false;
     }
-    openCurrentLineLink();
+    state.cursorLine = line;
+    state.cursorColumn = column;
+    state.cursorPreferredColumn = column;
+    openDocumentLink(link);
     return true;
   }
 
@@ -1723,9 +1751,19 @@ export async function runTui(options: TuiOptions): Promise<void> {
       state.searchMatchIndex = -1;
       return;
     }
-    const rendered = renderMarkdownToAnsi(state.markdownSource, { width: currentDocumentRenderWidth(), color: false });
+    let rendered = "";
+    let documentLines: string[] = [];
+    let lineCount = state.documentLines.length;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      rendered = renderMarkdownToAnsi(state.markdownSource, { width: currentDocumentRenderWidth(lineCount), color: false });
+      documentLines = rendered.split("\n");
+      if (lineNumberGutterWidth(documentLines.length) === lineNumberGutterWidth(lineCount)) {
+        break;
+      }
+      lineCount = documentLines.length;
+    }
     state.documentText = rendered;
-    state.documentLines = rendered.split("\n");
+    state.documentLines = documentLines;
     if (state.searchConfirmed || state.documentSearchActive) {
       state.searchMatches = findAllSearchMatches(state.documentSearchQuery);
       state.searchMatchIndex = state.searchMatches.length === 0 ? -1 : clamp(state.searchMatchIndex, 0, state.searchMatches.length - 1);
@@ -1734,10 +1772,15 @@ export async function runTui(options: TuiOptions): Promise<void> {
     state.cursorColumn = clamp(state.cursorPreferredColumn, 0, lineLength(state.cursorLine));
   }
 
-  function currentDocumentRenderWidth(): number {
-    const zoomWidth = state.zoomLevel * 8;
-    const baseWidth = Math.max(40, renderer.terminalWidth - 8);
-    return state.wrapEnabled ? clamp(baseWidth + zoomWidth, 30, 400) : 400;
+  function currentDocumentRenderWidth(lineCount = state.documentLines.length): number {
+    return documentRenderWidth({
+      wrapEnabled: state.wrapEnabled,
+      zoomLevel: state.zoomLevel,
+      viewerWidth: viewer.width,
+      terminalWidth: renderer.terminalWidth,
+      lineCount,
+      lineNumbersVisible: state.route.type === "document",
+    });
   }
 
   function clampScrollTop(): void {
