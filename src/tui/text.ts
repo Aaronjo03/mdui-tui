@@ -28,7 +28,10 @@ export interface DocumentSearchInputState {
 
 export function footerText(notice: string, state: FooterState = {}): string {
   const vimMode = state.vimMode ?? "normal";
-  const cursor = state.cursorLine !== undefined && state.cursorColumn !== undefined ? ` • ${state.cursorLine}:${state.cursorColumn}` : "";
+  const cursor =
+    state.cursorLine !== undefined && state.cursorColumn !== undefined
+      ? ` • ${state.cursorLine}:${state.cursorColumn}`
+      : "";
   const stats = state.documentStats !== undefined ? ` • ${state.documentStats}` : "";
   const base = `${modeLabel(vimMode)}${cursor}${stats} • arrows/hjkl move • Tab/Esc sidebar • Ctrl-Shift-? help`;
   return notice.length > 0 ? `${base} • ${notice}` : base;

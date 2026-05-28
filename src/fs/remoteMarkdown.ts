@@ -56,7 +56,10 @@ export function resolveRemoteMarkdownUrl(baseUrl: string, target: string): strin
   }
 }
 
-export async function fetchRemoteMarkdown(url: string, options: FetchRemoteMarkdownOptions = {}): Promise<RemoteMarkdownDocument> {
+export async function fetchRemoteMarkdown(
+  url: string,
+  options: FetchRemoteMarkdownOptions = {},
+): Promise<RemoteMarkdownDocument> {
   const sourceUrl = normalizeRemoteMarkdownUrl(url);
   if (sourceUrl === undefined) {
     throw new Error("Remote Markdown URL must use http(s) and end in a Markdown extension");
@@ -111,7 +114,7 @@ export async function fetchRemoteMarkdown(url: string, options: FetchRemoteMarkd
     }
   } catch (error) {
     if (isAbortError(error)) {
-      throw new Error(`Timed out fetching ${sourceUrl}`);
+      throw new Error(`Timed out fetching ${sourceUrl}`, { cause: error });
     }
     throw error;
   } finally {

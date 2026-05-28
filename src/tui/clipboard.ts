@@ -62,7 +62,10 @@ export function nativeClipboardReadCommands(platform: NodeJS.Platform = process.
   }
 }
 
-export function copyWithNativeClipboard(text: string, commands: readonly ClipboardCommand[] = nativeClipboardCommands()): boolean {
+export function copyWithNativeClipboard(
+  text: string,
+  commands: readonly ClipboardCommand[] = nativeClipboardCommands(),
+): boolean {
   for (const command of commands) {
     const result = spawnSync(command.executable, command.args, {
       input: text,
@@ -78,7 +81,9 @@ export function copyWithNativeClipboard(text: string, commands: readonly Clipboa
   return false;
 }
 
-export function readFromNativeClipboard(commands: readonly ClipboardCommand[] = nativeClipboardReadCommands()): string | undefined {
+export function readFromNativeClipboard(
+  commands: readonly ClipboardCommand[] = nativeClipboardReadCommands(),
+): string | undefined {
   for (const command of commands) {
     const result = spawnSync(command.executable, command.args, {
       encoding: "utf8",

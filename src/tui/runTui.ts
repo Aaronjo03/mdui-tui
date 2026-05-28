@@ -22,7 +22,12 @@ import { markdownToSlackMrkdwn } from "../export/slack.js";
 import { discoverMarkdownFiles, type MarkdownFile } from "../fs/markdownFiles.js";
 import { fetchRemoteMarkdown, resolveRemoteMarkdownUrl, type RemoteMarkdownDocument } from "../fs/remoteMarkdown.js";
 import { filterFiles, type RankedFile } from "../finder/filterFiles.js";
-import { firstRenderedDocumentLink, renderedDocumentLinkAt, resolveInternalMarkdownFile, type ParsedDocumentLink } from "../markdown/links.js";
+import {
+  firstRenderedDocumentLink,
+  renderedDocumentLinkAt,
+  resolveInternalMarkdownFile,
+  type ParsedDocumentLink,
+} from "../markdown/links.js";
 import { renderMarkdownToAnsi } from "../render/markdownToAnsi.js";
 import { copyToClipboard, readFromNativeClipboard } from "./clipboard.js";
 import { syncCursorToViewportState } from "./cursorState.js";
@@ -292,14 +297,25 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
   const header = new TextRenderable(renderer, {
     id: "mdui-header",
-    content: headerText(state.query, state.ranked.length, files.length, state.filterActive, state.vimMode, state.sidebarVisible, {
-      active: state.urlInputActive,
-      query: state.urlInputQuery,
-    }, {
-      active: state.documentSearchActive || state.searchMatches.length > 0,
-      query: state.documentSearchQuery,
-      ...(state.searchMatches.length > 0 ? { match: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` } : {}),
-    }),
+    content: headerText(
+      state.query,
+      state.ranked.length,
+      files.length,
+      state.filterActive,
+      state.vimMode,
+      state.sidebarVisible,
+      {
+        active: state.urlInputActive,
+        query: state.urlInputQuery,
+      },
+      {
+        active: state.documentSearchActive || state.searchMatches.length > 0,
+        query: state.documentSearchQuery,
+        ...(state.searchMatches.length > 0
+          ? { match: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` }
+          : {}),
+      },
+    ),
     fg: "#7DD3FC",
   });
   root.add(header);
@@ -495,7 +511,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
       return;
     }
 
-    const resetGoPrefix = state.goPrefixActive && !(state.route.type === "document" && key.name === "g" && !key.ctrl && !key.meta);
+    const resetGoPrefix =
+      state.goPrefixActive && !(state.route.type === "document" && key.name === "g" && !key.ctrl && !key.meta);
     if (resetGoPrefix) {
       state.goPrefixActive = false;
     }
@@ -1031,7 +1048,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
     viewer.focus();
   }
 
-  async function readStableDocument(file: MarkdownFile): Promise<{ readonly markdown: string; readonly mtimeMs: number }> {
+  async function readStableDocument(
+    file: MarkdownFile,
+  ): Promise<{ readonly markdown: string; readonly mtimeMs: number }> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const before = await stat(file.absolutePath);
       const markdown = await readFile(file.absolutePath, "utf8");
@@ -1082,7 +1101,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function isCurrentDocumentLoad(file: MarkdownFile, loadGeneration: number): boolean {
-    return state.route.type === "document" && state.route.file.absolutePath === file.absolutePath && documentLoadGeneration === loadGeneration;
+    return (
+      state.route.type === "document" &&
+      state.route.file.absolutePath === file.absolutePath &&
+      documentLoadGeneration === loadGeneration
+    );
   }
 
   async function placeDocumentCursorAfterLayout(): Promise<void> {
@@ -1103,14 +1126,25 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function refreshChrome(): void {
-    header.content = headerText(state.query, state.ranked.length, files.length, state.filterActive, state.vimMode, state.sidebarVisible, {
-      active: state.urlInputActive,
-      query: state.urlInputQuery,
-    }, {
-      active: state.documentSearchActive || state.searchMatches.length > 0,
-      query: state.documentSearchQuery,
-      ...(state.searchMatches.length > 0 ? { match: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` } : {}),
-    });
+    header.content = headerText(
+      state.query,
+      state.ranked.length,
+      files.length,
+      state.filterActive,
+      state.vimMode,
+      state.sidebarVisible,
+      {
+        active: state.urlInputActive,
+        query: state.urlInputQuery,
+      },
+      {
+        active: state.documentSearchActive || state.searchMatches.length > 0,
+        query: state.documentSearchQuery,
+        ...(state.searchMatches.length > 0
+          ? { match: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` }
+          : {}),
+      },
+    );
     footer.content = footerText(state.notice, footerState());
     lineNumbers.visible = state.route.type === "document";
     lineNumbers.width = lineNumberGutterWidth(state.documentLines.length);
@@ -1142,7 +1176,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
   function lineNumberText(lineCount: number): string {
     const width = lineNumberGutterWidth(lineCount) - 1;
-    return Array.from({ length: Math.max(1, lineCount) }, (_, index) => `${String(index).padStart(width, " ")} `).join("\n");
+    return Array.from({ length: Math.max(1, lineCount) }, (_, index) => `${String(index).padStart(width, " ")} `).join(
+      "\n",
+    );
   }
 
   function layoutHelpPanel(): void {
@@ -1199,7 +1235,12 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
   function updateSearchHighlightOverlay(): void {
     hideSearchHighlightOverlays();
-    if (state.route.type !== "document" || state.sidebarVisible || state.documentSearchQuery.length === 0 || state.searchMatches.length === 0) {
+    if (
+      state.route.type !== "document" ||
+      state.sidebarVisible ||
+      state.documentSearchQuery.length === 0 ||
+      state.searchMatches.length === 0
+    ) {
       return;
     }
     let overlayIndex = 0;
@@ -1360,9 +1401,13 @@ export async function runTui(options: TuiOptions): Promise<void> {
       wrapEnabled: state.wrapEnabled,
       zoomLevel: state.zoomLevel,
       ...(state.route.type === "document" ? { cursorLine: state.cursorLine, cursorColumn: state.cursorColumn } : {}),
-      ...(state.vimMode !== "normal" ? { selectionAnchorLine: state.visualAnchorLine, selectionAnchorColumn: state.visualAnchorColumn } : {}),
+      ...(state.vimMode !== "normal"
+        ? { selectionAnchorLine: state.visualAnchorLine, selectionAnchorColumn: state.visualAnchorColumn }
+        : {}),
       ...(state.documentSearchActive ? { searchQuery: state.documentSearchQuery } : {}),
-      ...(state.searchMatches.length > 0 ? { searchMatch: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` } : {}),
+      ...(state.searchMatches.length > 0
+        ? { searchMatch: `${state.searchMatchIndex + 1}/${state.searchMatches.length}` }
+        : {}),
       ...(state.countPrefix.length > 0 ? { countPrefix: state.countPrefix } : {}),
       ...(state.route.type === "document" ? { documentStats: formatDocumentStats(state.documentStats) } : {}),
     };
@@ -1508,7 +1553,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
   function syncCursorToViewport(): void {
     const synced = syncCursorToViewportState(
       { cursorLine: state.cursorLine, cursorColumn: state.cursorColumn, cursorViewportRow: state.cursorViewportRow },
-      { documentLineCount: state.documentLines.length, scrollTop: viewer.scrollTop, visibleRows: visibleDocumentRows() },
+      {
+        documentLineCount: state.documentLines.length,
+        scrollTop: viewer.scrollTop,
+        visibleRows: visibleDocumentRows(),
+      },
       lineLength,
     );
     state.cursorLine = synced.cursorLine;
@@ -1535,11 +1584,18 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function updateSearchSelection(): void {
-    if ((!state.documentSearchActive && !state.searchConfirmed) || state.documentSearchQuery.length === 0 || state.sidebarVisible) {
+    if (
+      (!state.documentSearchActive && !state.searchConfirmed) ||
+      state.documentSearchQuery.length === 0 ||
+      state.sidebarVisible
+    ) {
       return;
     }
     const start = cursorScreenPosition(state.cursorLine, state.cursorColumn);
-    const end = cursorScreenPosition(state.cursorLine, state.cursorColumn + Math.max(1, state.documentSearchQuery.length));
+    const end = cursorScreenPosition(
+      state.cursorLine,
+      state.cursorColumn + Math.max(1, state.documentSearchQuery.length),
+    );
     if (start === undefined || end === undefined) {
       return;
     }
@@ -1571,7 +1627,12 @@ export async function runTui(options: TuiOptions): Promise<void> {
   function copySelection(options: { readonly fallbackToDocument: boolean }): boolean {
     const selection = renderer.getSelection();
     const selectedText = selection?.getSelectedText().trim();
-    const textToCopy = selectedText !== undefined && selectedText.length > 0 ? selectedText : options.fallbackToDocument ? state.documentText.trim() : "";
+    const textToCopy =
+      selectedText !== undefined && selectedText.length > 0
+        ? selectedText
+        : options.fallbackToDocument
+          ? state.documentText.trim()
+          : "";
     if (textToCopy.length === 0) {
       if (options.fallbackToDocument) {
         showNotice("Nothing to copy");
@@ -1579,7 +1640,13 @@ export async function runTui(options: TuiOptions): Promise<void> {
       return false;
     }
     const copied = copyTextToClipboard(textToCopy);
-    showNotice(copied ? (selectedText !== undefined && selectedText.length > 0 ? "Copied highlighted text" : "Copied document") : "Clipboard copy failed");
+    showNotice(
+      copied
+        ? selectedText !== undefined && selectedText.length > 0
+          ? "Copied highlighted text"
+          : "Copied document"
+        : "Clipboard copy failed",
+    );
     try {
       renderer.clearSelection();
     } catch (error) {
@@ -1602,7 +1669,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
     if (state.route.type !== "document") {
       return;
     }
-    const link = selectedRenderedDocumentLink() ?? renderedDocumentLinkAt(state.documentLines[state.cursorLine] ?? "", state.cursorColumn);
+    const link =
+      selectedRenderedDocumentLink() ??
+      renderedDocumentLinkAt(state.documentLines[state.cursorLine] ?? "", state.cursorColumn);
     if (link === undefined) {
       showNotice("No link at cursor");
       return;
@@ -1728,13 +1797,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
   }
 
   function copyTextToClipboard(text: string): boolean {
-    let copied = false;
     try {
-      copied = renderer.copyToClipboardOSC52(text);
+      return renderer.copyToClipboardOSC52(text) || copyToClipboard(text);
     } catch {
-      copied = false;
+      return copyToClipboard(text);
     }
-    return copied || copyToClipboard(text);
   }
 
   function applyDocumentLayout(): void {
@@ -1755,7 +1822,10 @@ export async function runTui(options: TuiOptions): Promise<void> {
     let documentLines: string[] = [];
     let lineCount = state.documentLines.length;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      rendered = renderMarkdownToAnsi(state.markdownSource, { width: currentDocumentRenderWidth(lineCount), color: false });
+      rendered = renderMarkdownToAnsi(state.markdownSource, {
+        width: currentDocumentRenderWidth(lineCount),
+        color: false,
+      });
       documentLines = rendered.split("\n");
       if (lineNumberGutterWidth(documentLines.length) === lineNumberGutterWidth(lineCount)) {
         break;
@@ -1766,7 +1836,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
     state.documentLines = documentLines;
     if (state.searchConfirmed || state.documentSearchActive) {
       state.searchMatches = findAllSearchMatches(state.documentSearchQuery);
-      state.searchMatchIndex = state.searchMatches.length === 0 ? -1 : clamp(state.searchMatchIndex, 0, state.searchMatches.length - 1);
+      state.searchMatchIndex =
+        state.searchMatches.length === 0 ? -1 : clamp(state.searchMatchIndex, 0, state.searchMatches.length - 1);
     }
     state.cursorLine = clamp(state.cursorLine, 0, Math.max(0, state.documentLines.length - 1));
     state.cursorColumn = clamp(state.cursorPreferredColumn, 0, lineLength(state.cursorLine));
@@ -1879,14 +1950,29 @@ function isOverlayCloseKey(key: KeyEvent): boolean {
 }
 
 function isHelpScrollKey(key: KeyEvent): boolean {
-  return key.name === "up" || key.name === "down" || key.name === "j" || key.name === "k" || (key.ctrl && (key.name === "d" || key.name === "u"));
+  return (
+    key.name === "up" ||
+    key.name === "down" ||
+    key.name === "j" ||
+    key.name === "k" ||
+    (key.ctrl && (key.name === "d" || key.name === "u"))
+  );
 }
 
 function isHelpToggleInput(key: KeyEvent): boolean {
-  return key.ctrl && (key.name === "?" || key.name === "/" || key.sequence === "\u001F" || key.raw === "\u001F" || (key.shift && key.name === "/"));
+  return (
+    key.ctrl &&
+    (key.name === "?" ||
+      key.name === "/" ||
+      key.sequence === "\u001F" ||
+      key.raw === "\u001F" ||
+      (key.shift && key.name === "/"))
+  );
 }
 
-function browserOpenCommand(url: string): { readonly executable: string; readonly args: readonly string[] } | undefined {
+function browserOpenCommand(
+  url: string,
+): { readonly executable: string; readonly args: readonly string[] } | undefined {
   const normalizedUrl = normalizeHttpUrl(url);
   if (normalizedUrl === undefined) {
     return undefined;
@@ -1965,7 +2051,7 @@ function markdownTableOptions(wrapEnabled: boolean) {
   return {
     style: "grid" as const,
     widthMode: "full" as const,
-    wrapMode: wrapEnabled ? "word" as const : "none" as const,
+    wrapMode: wrapEnabled ? ("word" as const) : ("none" as const),
     cellPadding: 1,
     borders: true,
     outerBorder: true,

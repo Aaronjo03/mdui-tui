@@ -32,7 +32,9 @@ async function main(args: readonly string[]): Promise<number> {
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stderr.write("mdui: interactive finder requires a TTY. Pass a Markdown file or remote .md URL to render directly.\n");
+    process.stderr.write(
+      "mdui: interactive finder requires a TTY. Pass a Markdown file or remote .md URL to render directly.\n",
+    );
     return 1;
   }
 
@@ -62,7 +64,9 @@ async function renderFile(filePath: string): Promise<void> {
     process.stderr.write(`mdui: '${filePath}' does not look like Markdown; rendering as Markdown anyway.\n`);
   }
   const width = process.stdout.columns > 0 ? process.stdout.columns : 88;
-  process.stdout.write(renderMarkdownToAnsi(source, { width, color: process.stdout.isTTY && process.env.NO_COLOR === undefined }));
+  process.stdout.write(
+    renderMarkdownToAnsi(source, { width, color: process.stdout.isTTY && process.env.NO_COLOR === undefined }),
+  );
 }
 
 async function renderRemoteFile(url: string): Promise<void> {
@@ -72,7 +76,12 @@ async function renderRemoteFile(url: string): Promise<void> {
   const remote = await fetchRemoteMarkdown(url);
   try {
     const width = process.stdout.columns > 0 ? process.stdout.columns : 88;
-    process.stdout.write(renderMarkdownToAnsi(remote.markdown, { width, color: process.stdout.isTTY && process.env.NO_COLOR === undefined }));
+    process.stdout.write(
+      renderMarkdownToAnsi(remote.markdown, {
+        width,
+        color: process.stdout.isTTY && process.env.NO_COLOR === undefined,
+      }),
+    );
   } finally {
     await rm(remote.tempDirectory, { recursive: true, force: true });
   }

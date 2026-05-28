@@ -63,10 +63,14 @@ describe("PDF export", () => {
     const chromeStubPath = await createChromeStub(tempDirectory);
 
     try {
-      const outputPath = await exportMarkdownToPdf(["<script>alert(1)</script>", "", "```html", "<div>code</div>", "```"].join("\n"), "html.md", {
-        outputDirectory: tempDirectory,
-        chromeExecutable: chromeStubPath,
-      });
+      const outputPath = await exportMarkdownToPdf(
+        ["<script>alert(1)</script>", "", "```html", "<div>code</div>", "```"].join("\n"),
+        "html.md",
+        {
+          outputDirectory: tempDirectory,
+          chromeExecutable: chromeStubPath,
+        },
+      );
       const documentUrl = await Bun.file(`${outputPath}.url`).text();
       const html = decodeDataUrlHtml(documentUrl);
 
@@ -83,10 +87,22 @@ describe("PDF export", () => {
     const chromeStubPath = await createChromeStub(tempDirectory);
 
     try {
-      const outputPath = await exportMarkdownToPdf(["<details>", "<summary>", "More", "</summary>", "<script>alert(1)</script>", "</details>", "Line<br>break"].join("\n"), "html.md", {
-        outputDirectory: tempDirectory,
-        chromeExecutable: chromeStubPath,
-      });
+      const outputPath = await exportMarkdownToPdf(
+        [
+          "<details>",
+          "<summary>",
+          "More",
+          "</summary>",
+          "<script>alert(1)</script>",
+          "</details>",
+          "Line<br>break",
+        ].join("\n"),
+        "html.md",
+        {
+          outputDirectory: tempDirectory,
+          chromeExecutable: chromeStubPath,
+        },
+      );
       const documentUrl = await Bun.file(`${outputPath}.url`).text();
       const html = decodeDataUrlHtml(documentUrl);
 

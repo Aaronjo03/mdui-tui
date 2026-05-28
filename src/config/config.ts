@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse } from "node:path";
+import * as z from "zod";
 
 export interface MduiConfig {
   readonly includeHidden?: boolean;
@@ -14,7 +15,36 @@ export interface ConfigDiscoveryResult {
   readonly config: MduiConfig;
 }
 
+interface ParsedMduiConfig {
+  includeHidden?: boolean;
+  maxDepth?: number;
+  ignoredDirectories?: readonly string[];
+  pdfOutputDirectory?: string;
+}
+
 const configFileNames = [".mduirc", ".mdui.json", "mdui.config.json"];
+
+const safeStringSchema = z
+  .string()
+  .min(1)
+  .max(4095)
+  .refine((value) => !value.includes("\u0000"));
+
+const configFieldSchemas = {
+  includeHidden: z.boolean(),
+  maxDepth: z.number().int().min(0).max(32),
+  ignoredDirectories: z.array(safeStringSchema.refine((value) => !value.includes("/") && !value.includes("\\"))),
+  pdfOutputDirectory: safeStringSchema,
+};
+
+const configRecordSchema = z.record(z.string(), z.unknown());
+
+export const mduiConfigSchema = z.strictObject({
+  includeHidden: configFieldSchemas.includeHidden.optional(),
+  maxDepth: configFieldSchemas.maxDepth.optional(),
+  ignoredDirectories: configFieldSchemas.ignoredDirectories.optional(),
+  pdfOutputDirectory: configFieldSchemas.pdfOutputDirectory.optional(),
+});
 
 export async function discoverMduiConfig(startDirectory: string): Promise<ConfigDiscoveryResult> {
   const explicitConfig = process.env.MDUI_CONFIG;
@@ -40,16 +70,30 @@ export async function discoverMduiConfig(startDirectory: string): Promise<Config
 }
 
 export function parseMduiConfig(value: unknown): MduiConfig {
-  if (!isRecord(value)) {
+  const recordResult = configRecordSchema.safeParse(value);
+  if (!recordResult.success) {
     return {};
   }
 
-  return {
-    ...(typeof value.includeHidden === "boolean" ? { includeHidden: value.includeHidden } : {}),
-    ...(isSafeMaxDepth(value.maxDepth) ? { maxDepth: value.maxDepth } : {}),
-    ...(isSafeStringArray(value.ignoredDirectories) ? { ignoredDirectories: value.ignoredDirectories } : {}),
-    ...(isSafeString(value.pdfOutputDirectory) ? { pdfOutputDirectory: value.pdfOutputDirectory } : {}),
-  };
+  const config: ParsedMduiConfig = {};
+  const valueRecord = recordResult.data;
+  const includeHidden = configFieldSchemas.includeHidden.safeParse(valueRecord.includeHidden);
+  if (includeHidden.success) {
+    config.includeHidden = includeHidden.data;
+  }
+  const maxDepth = configFieldSchemas.maxDepth.safeParse(valueRecord.maxDepth);
+  if (maxDepth.success) {
+    config.maxDepth = maxDepth.data;
+  }
+  const ignoredDirectories = configFieldSchemas.ignoredDirectories.safeParse(valueRecord.ignoredDirectories);
+  if (ignoredDirectories.success) {
+    config.ignoredDirectories = ignoredDirectories.data;
+  }
+  const pdfOutputDirectory = configFieldSchemas.pdfOutputDirectory.safeParse(valueRecord.pdfOutputDirectory);
+  if (pdfOutputDirectory.success) {
+    config.pdfOutputDirectory = pdfOutputDirectory.data;
+  }
+  return config;
 }
 
 async function readConfigFile(path: string): Promise<MduiConfig | undefined> {
@@ -74,22 +118,6 @@ function parentDirectories(startDirectory: string): readonly string[] {
     }
     current = dirname(current);
   }
-}
-
-function isSafeMaxDepth(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 32;
-}
-
-function isSafeString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length < 4096 && !value.includes("\u0000");
-}
-
-function isSafeStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((entry) => isSafeString(entry) && !entry.includes("/") && !entry.includes("\\"));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isMissingFile(error: unknown): boolean {

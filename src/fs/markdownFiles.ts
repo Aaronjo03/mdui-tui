@@ -50,7 +50,14 @@ export async function discoverMarkdownFiles(options: DiscoverOptions): Promise<r
   const fileSystem = options.fileSystem ?? defaultFileSystem;
   const ignoredDirectories = new Set([...(options.ignoredDirectories ?? []), ...defaultIgnoredDirectories]);
   const files: MarkdownFile[] = [];
-  await walk(options.rootDirectory, options.rootDirectory, files, { includeHidden: options.includeHidden ?? false, maxDepth, ignoredDirectories }, fileSystem, 0);
+  await walk(
+    options.rootDirectory,
+    options.rootDirectory,
+    files,
+    { includeHidden: options.includeHidden ?? false, maxDepth, ignoredDirectories },
+    fileSystem,
+    0,
+  );
   return files.sort((left, right) => right.modifiedAt.getTime() - left.modifiedAt.getTime());
 }
 
@@ -58,7 +65,9 @@ async function walk(
   rootDirectory: string,
   currentDirectory: string,
   files: MarkdownFile[],
-  options: Required<Pick<DiscoverOptions, "includeHidden" | "maxDepth">> & { readonly ignoredDirectories: ReadonlySet<string> },
+  options: Required<Pick<DiscoverOptions, "includeHidden" | "maxDepth">> & {
+    readonly ignoredDirectories: ReadonlySet<string>;
+  },
   fileSystem: MarkdownFileSystem,
   depth: number,
 ): Promise<void> {

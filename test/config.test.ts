@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverMduiConfig, parseMduiConfig } from "../src/config/config.js";
+import { discoverMduiConfig, mduiConfigSchema, parseMduiConfig } from "../src/config/config.js";
 
 describe("MDUI config", () => {
   it("keeps only safe data settings", () => {
@@ -15,11 +15,29 @@ describe("MDUI config", () => {
         command: "rm -rf /",
         maxDepthTooHigh: 100,
       }),
-    ).toEqual({ includeHidden: true, maxDepth: 4, ignoredDirectories: ["vendor", "tmp-notes"], pdfOutputDirectory: "./out" });
+    ).toEqual({
+      includeHidden: true,
+      maxDepth: 4,
+      ignoredDirectories: ["vendor", "tmp-notes"],
+      pdfOutputDirectory: "./out",
+    });
   });
 
   it("rejects malformed values", () => {
-    expect(parseMduiConfig({ includeHidden: "yes", maxDepth: 99, ignoredDirectories: ["nested/path"], pdfOutputDirectory: "" })).toEqual({});
+    expect(
+      parseMduiConfig({
+        includeHidden: "yes",
+        maxDepth: 99,
+        ignoredDirectories: ["nested/path"],
+        pdfOutputDirectory: "",
+      }),
+    ).toEqual({});
+  });
+
+  it("exports a reusable Zod schema for strict config validation", () => {
+    expect(mduiConfigSchema.safeParse({ includeHidden: true, maxDepth: 8 }).success).toBe(true);
+    expect(mduiConfigSchema.safeParse({ includeHidden: "true", maxDepth: 33 }).success).toBe(false);
+    expect(mduiConfigSchema.safeParse({ command: "rm -rf /" }).success).toBe(false);
   });
 
   it("discovers JSON config from parent directories", async () => {

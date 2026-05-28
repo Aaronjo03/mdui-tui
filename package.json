@@ -1,7 +1,7 @@
 {
   "name": "mdui-tui",
   "version": "0.1.1",
-  "description": "Terminal Markdown renderer and viewer \u2014 open, navigate, search, copy, and export Markdown files from the CLI with vim keybindings and interactive finder.",
+  "description": "Terminal Markdown renderer and viewer — open, navigate, search, copy, and export Markdown files from the CLI with vim keybindings and interactive finder.",
   "license": "MIT",
   "type": "module",
   "packageManager": "bun@1.3.4",
@@ -15,6 +15,12 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "ci": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "bun run lint:eslint && bun run lint:biome",
+    "lint:biome": "biome lint .",
+    "lint:eslint": "eslint src test",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "bun --bun node_modules/vitest/vitest.mjs run",
     "prepack": "bun \"node_modules/typescript/bin/tsc\" -p tsconfig.json",
@@ -55,12 +61,19 @@
   "dependencies": {
     "@opentui/core": "0.2.0",
     "marked": "18.0.2",
-    "slackify-markdown": "4.5.0"
+    "slackify-markdown": "4.5.0",
+    "zod": "4.4.2"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.14",
+    "@eslint/js": "10.0.1",
     "@types/node": "25.6.0",
     "bun-types": "1.3.13",
+    "eslint": "10.3.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.6.0",
     "typescript": "6.0.3",
+    "typescript-eslint": "8.59.1",
     "vitest": "4.1.5"
   },
   "engines": {

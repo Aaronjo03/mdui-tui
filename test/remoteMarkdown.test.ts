@@ -2,7 +2,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { fetchRemoteMarkdown, isRemoteMarkdownUrl, normalizeRemoteMarkdownUrl, resolveRemoteMarkdownUrl } from "../src/fs/remoteMarkdown.js";
+import {
+  fetchRemoteMarkdown,
+  isRemoteMarkdownUrl,
+  normalizeRemoteMarkdownUrl,
+  resolveRemoteMarkdownUrl,
+} from "../src/fs/remoteMarkdown.js";
 
 describe("remote Markdown helpers", () => {
   const tempDirectories: string[] = [];
@@ -18,12 +23,18 @@ describe("remote Markdown helpers", () => {
     expect(isRemoteMarkdownUrl("http://example.com/docs/readme.markdown?download=1")).toBe(true);
     expect(isRemoteMarkdownUrl("https://telnyx.com/pricing")).toBe(false);
     expect(isRemoteMarkdownUrl("file:///tmp/readme.md")).toBe(false);
-    expect(normalizeRemoteMarkdownUrl("https://telnyx.com/pricing.md#plans")).toBe("https://telnyx.com/pricing.md#plans");
+    expect(normalizeRemoteMarkdownUrl("https://telnyx.com/pricing.md#plans")).toBe(
+      "https://telnyx.com/pricing.md#plans",
+    );
   });
 
   it("resolves relative remote Markdown links against a remote base URL", () => {
-    expect(resolveRemoteMarkdownUrl("https://telnyx.com/docs/index.md", "pricing.md#sms")).toBe("https://telnyx.com/docs/pricing.md");
-    expect(resolveRemoteMarkdownUrl("https://telnyx.com/docs/index.md", "../pricing.md")).toBe("https://telnyx.com/pricing.md");
+    expect(resolveRemoteMarkdownUrl("https://telnyx.com/docs/index.md", "pricing.md#sms")).toBe(
+      "https://telnyx.com/docs/pricing.md",
+    );
+    expect(resolveRemoteMarkdownUrl("https://telnyx.com/docs/index.md", "../pricing.md")).toBe(
+      "https://telnyx.com/pricing.md",
+    );
     expect(resolveRemoteMarkdownUrl("https://telnyx.com/docs/index.md", "../pricing")).toBeUndefined();
   });
 
@@ -124,7 +135,11 @@ describe("remote Markdown helpers", () => {
     tempDirectories.push(tempDirectory);
     const document = await fetchRemoteMarkdown("https://telnyx.com/pricing.md", {
       tempDirectory,
-      fetcher: async () => new Response("# Safe\n\u001B]52;c;bad\u0007\u001B[31mred\u001B[0m\u009B31mc1\u009D52;c;bad\u009C\u0000", { status: 200, statusText: "OK" }),
+      fetcher: async () =>
+        new Response("# Safe\n\u001B]52;c;bad\u0007\u001B[31mred\u001B[0m\u009B31mc1\u009D52;c;bad\u009C\u0000", {
+          status: 200,
+          statusText: "OK",
+        }),
     });
 
     expect(document.markdown).toBe("# Safe\nred");

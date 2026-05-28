@@ -88,7 +88,10 @@ function parseCodeFence(lines: readonly string[], startIndex: number): { block: 
   return { block: { kind: "code", language, code: codeLines.join("\n") }, nextIndex: index };
 }
 
-function parseTable(lines: readonly string[], startIndex: number): { block: MarkdownBlock; nextIndex: number } | undefined {
+function parseTable(
+  lines: readonly string[],
+  startIndex: number,
+): { block: MarkdownBlock; nextIndex: number } | undefined {
   const headerLine = lines[startIndex];
   const dividerLine = lines[startIndex + 1];
   if (headerLine === undefined || dividerLine === undefined || !isTableRow(headerLine) || !isDividerRow(dividerLine)) {
@@ -202,7 +205,10 @@ export function parseInline(text: string): InlineSegment[] {
 }
 
 function findNextInlineMatch(text: string): { index: number; length: number; segment: InlineSegment } | undefined {
-  const patterns: readonly { readonly regex: RegExp; readonly toSegment: (match: RegExpExecArray) => InlineSegment | undefined }[] = [
+  const patterns: readonly {
+    readonly regex: RegExp;
+    readonly toSegment: (match: RegExpExecArray) => InlineSegment | undefined;
+  }[] = [
     { regex: /`([^`]+)`/, toSegment: (match) => segmentFromMatch("code", match) },
     { regex: /\*\*([^*]+)\*\*/, toSegment: (match) => segmentFromMatch("strong", match) },
     { regex: /__([^_]+)__/, toSegment: (match) => segmentFromMatch("strong", match) },

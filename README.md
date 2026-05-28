@@ -144,10 +144,14 @@ Config files cannot define shell commands or keybindings. Clipboard fallbacks ar
 
 ```sh
 bun install
-bun "node_modules/typescript/bin/tsc" --noEmit -p tsconfig.test.json
+bun run format:check
+bun run lint
+bun run typecheck
 bun run test
-bun "node_modules/typescript/bin/tsc" -p tsconfig.json
+bun run build
 ```
+
+Run the full local CI suite with `bun run ci`. Use `bun run format` to apply Biome formatting.
 
 ## npm publishing prep
 

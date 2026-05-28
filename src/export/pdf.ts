@@ -13,7 +13,11 @@ export interface PdfExportOptions {
   readonly chromeExecutable?: string;
 }
 
-export async function exportMarkdownToPdf(markdown: string, sourcePath: string, options: PdfExportOptions = {}): Promise<string> {
+export async function exportMarkdownToPdf(
+  markdown: string,
+  sourcePath: string,
+  options: PdfExportOptions = {},
+): Promise<string> {
   const outputDirectory = options.outputDirectory ?? join(homedir(), "Downloads");
   const outputPath = join(outputDirectory, `${pdfBaseName(sourcePath)}.pdf`);
   const chromePath = options.chromeExecutable ?? (await findChromeExecutable());
@@ -159,7 +163,13 @@ function chromeExecutableCandidates(): readonly string[] {
         ...pathCandidates(["google-chrome", "chromium", "chromium-browser", "microsoft-edge"]),
       ];
     case "linux":
-      return pathCandidates(["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge"]);
+      return pathCandidates([
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "microsoft-edge",
+      ]);
     case "win32":
       return windowsChromeCandidates();
     default:
@@ -173,7 +183,9 @@ function pathCandidates(names: readonly string[]): string[] {
 }
 
 function windowsChromeCandidates(): string[] {
-  const bases = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter((value): value is string => value !== undefined);
+  const bases = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(
+    (value): value is string => value !== undefined,
+  );
   return bases.flatMap((base) => [
     join(base, "Google", "Chrome", "Application", "chrome.exe"),
     join(base, "Chromium", "Application", "chrome.exe"),
